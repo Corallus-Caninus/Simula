@@ -930,17 +930,23 @@ appLaunch gss appStr maybeLocation = do
                         Just user -> M.insert "USER" user (M.insert "LOGNAME" user envMap'')
                         Nothing -> envMap''
       
-      let envMapWithTerm = M.insert "TERM" "xterm-256color" envMap'''
-      let envMapWithDisplay = M.insert "DISPLAY" xwaylandDisplay envMapWithTerm
-      let envMapWithLayout = M.insert "XKB_DEFAULT_LAYOUT" "us" (M.insert "XKB_DEFAULT_VARIANT" "" envMapWithDisplay)
-      let envMapWithWaylandDisplay = case maybeLocation of
-            (Just location) -> M.insert "SIMULA_STARTING_LOCATION" location (M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithLayout)
-            (Nothing)       -> (M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithLayout)
+      -- Unset LD_LIBRARY_PATH to avoid FHS/Nix conflicts
+      -- and set standard terminal variables
+      let envMapClean = M.delete "LD_LIBRARY_PATH" $ M.insert "TERM" "xterm-256color" $ M.insert "LANG" "en_US.UTF-8" envMap'''
+      
+      let envMapWithDisplay = M.insert "DISPLAY" xwaylandDisplay envMapClean
+      let isTerminal = "xfce4-terminal" `Data.List.isInfixOf` appStr || "kitty" `Data.List.isInfixOf` appStr
+      let envMapWithWaylandDisplay = case (maybeLocation, isTerminal) of
+            (Just location, False) -> M.insert "SIMULA_STARTING_LOCATION" location (M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithDisplay)
+            (Just location, True)  -> M.insert "SIMULA_STARTING_LOCATION" location (M.insert "WAYLAND_DISPLAY" "" envMapWithDisplay)
+            (Nothing, False)       -> (M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithDisplay)
+            (Nothing, True)        -> M.insert "WAYLAND_DISPLAY" "" envMapWithDisplay
       
       let envListWithDisplays = M.toList envMapWithWaylandDisplay
       putStrLn $ "appLaunch: running " ++ appStr
       putStrLn $ "appLaunch: DISPLAY=" ++ (fromMaybe "NONE" $ M.lookup "DISPLAY" envMapWithWaylandDisplay)
       putStrLn $ "appLaunch: WAYLAND_DISPLAY=" ++ (fromMaybe "NONE" $ M.lookup "WAYLAND_DISPLAY" envMapWithWaylandDisplay)
+      putStrLn $ "appLaunch: LD_LIBRARY_PATH=" ++ (fromMaybe "CLEARED" $ M.lookup "LD_LIBRARY_PATH" envMapWithWaylandDisplay)
       putStrLn $ "appLaunch: HOME=" ++ (fromMaybe "NONE" $ M.lookup "HOME" envMapWithWaylandDisplay)
       
       res <- Control.Exception.Safe.try $ createProcess (shell appStr) { env = Just envListWithDisplays, new_session = True } :: IO (Either IOException (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle))
