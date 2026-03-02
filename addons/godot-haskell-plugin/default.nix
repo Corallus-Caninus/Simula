@@ -16,7 +16,7 @@
 
 haskellPackages.mkDerivation {
   pname = "godot-haskell-plugin";
-  version = "0.1.0.0";
+  version = "0.1.0.0-force-rebuild-2";
   src = lib.cleanSource ./.;
 
   libraryHaskellDepends = [

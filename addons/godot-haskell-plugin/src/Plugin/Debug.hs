@@ -97,7 +97,7 @@ debugLaunchApp gss app = do
 
   where waitUntilAppLaunchSuccessful :: GodotSimulaServer -> IO GodotSimulaViewSprite
         waitUntilAppLaunchSuccessful gss = do
-          Control.Concurrent.threadDelay (round (0.2 * 1000000)) -- HACK: Need some other blocking IO call to induce other threads to run/the gsvs to actually get launched
+          -- Control.Concurrent.-- threadDelay (round (0.2 * 1000000)) -- HACK: Need some other blocking IO call to induce other threads to run/the gsvs to actually get launched
           maybeActiveCursorGSVS <- readTVarIO (gss ^. gssActiveCursorGSVS)
           gsvs <- case maybeActiveCursorGSVS of
                       Nothing -> waitUntilAppLaunchSuccessful gss
@@ -111,7 +111,7 @@ debugWaitFrames gsvs n = do
   where debugWaitFrames' :: GodotSimulaViewSprite -> Integer -> Integer -> IO ()
         debugWaitFrames' gsvs orig n = do
           frameCount <- readTVarIO (gsvs ^. gsvsFrameCount)
-          Control.Concurrent.threadDelay (round (0.2 * 1000000)) -- HACK: Need some other blocking IO call to induce other threads to run/the gsvs to actually get launched
+          -- Control.Concurrent.-- threadDelay (round (0.2 * 1000000)) -- HACK: Need some other blocking IO call to induce other threads to run/the gsvs to actually get launched
           case (frameCount >= (orig + n)) of
             False -> debugWaitFrames' gsvs orig n
             True -> return ()
@@ -156,13 +156,13 @@ debugTerminateSimula gss = do
 
 testRightclickPopup :: GodotSimulaServer -> String -> ScreenshotBaseName -> IO ((Float, Float), (Float, Float), ScreenshotFullPath)
 testRightclickPopup gss app screenshotBase = do
-  Control.Concurrent.threadDelay (2 * 1000000)
+  -- Control.Concurrent.-- threadDelay (2 * 1000000)
   gsvs <- debugLaunchApp gss app
   debugMoveCursor gsvs (300,300)
-  Control.Concurrent.threadDelay (round (0.5 * 1000000))
+  -- Control.Concurrent.-- threadDelay (round (0.5 * 1000000))
   debugMouseClick 2 True
   debugMouseClick 2 False
-  Control.Concurrent.threadDelay (5 * 1000000)
+  -- Control.Concurrent.-- threadDelay (5 * 1000000)
   
   maybeDataDir <- lookupEnv "SIMULA_DATA_DIR"
   let dataDir = fromMaybe "./.local/share/Simula" maybeDataDir
@@ -190,21 +190,21 @@ testRightclickPopup gss app screenshotBase = do
                                              (_, True) -> return $ depthFirstSurfaces !! 1
                                              _ -> return $ depthFirstSurfaces !! 0
 
-  Control.Concurrent.threadDelay (1 * 1000000)
+  -- Control.Concurrent.-- threadDelay (1 * 1000000)
   debugLogDepthFirstSurfaces gsvs
-  Control.Concurrent.threadDelay (2 * 1000000)
+  -- Control.Concurrent.-- threadDelay (2 * 1000000)
   createProcess (shell $ "pkill " ++ app)
   return ((cx, cy), (fromIntegral px, fromIntegral py), screenshotFullPath)
   
 testAppMemory :: GodotSimulaServer -> String -> Int -> IO (Float, Float)
 testAppMemory gss app sec = do
   pid1 <- logMemPid gss
-  Control.Concurrent.threadDelay (2 * 1000000)
+  -- Control.Concurrent.-- threadDelay (2 * 1000000)
   gsvs <- debugLaunchApp gss app
-  Control.Concurrent.threadDelay (round (0.5 * 1000000))
-  Control.Concurrent.threadDelay (5 * 1000000)
-  Control.Concurrent.threadDelay (1 * 1000000)
-  Control.Concurrent.threadDelay (sec * 1000000)
+  -- Control.Concurrent.-- threadDelay (round (0.5 * 1000000))
+  -- Control.Concurrent.-- threadDelay (5 * 1000000)
+  -- Control.Concurrent.-- threadDelay (1 * 1000000)
+  -- Control.Concurrent.-- threadDelay (sec * 1000000)
   pid2 <- logMemPid gss
   createProcess (shell $ "pkill " ++ app)
   return (pid1, pid2)
@@ -217,10 +217,10 @@ debugTerminateApps gss = do
   return ()
   where snd (a, b) = b
 
--- | Suffers from threading issues, even with liberal threadDelay hack calls.
+-- | Suffers from threading issues, even with liberal -- threadDelay hack calls.
 debugTerminateGSVS :: GodotSimulaViewSprite -> IO ()
 debugTerminateGSVS gsvs = do
-  Control.Concurrent.threadDelay (2 * 1000000)
+  -- Control.Concurrent.-- threadDelay (2 * 1000000)
   gss <- readTVarIO (gsvs ^. gsvsServer)
   simulaView <- readTVarIO (gsvs ^. gsvsView)
   let eitherSurface = (simulaView ^. svWlrEitherSurface)
@@ -233,12 +233,12 @@ debugTerminateGSVS gsvs = do
   waitUntilAppCloseSuccessful gss
   where waitUntilAppCloseSuccessful :: GodotSimulaServer -> IO ()
         waitUntilAppCloseSuccessful gss = do
-          Control.Concurrent.threadDelay (2 * 1000000)
+          -- Control.Concurrent.-- threadDelay (2 * 1000000)
           maybeActiveCursorGSVS <- readTVarIO (gss ^. gssActiveCursorGSVS)
           case maybeActiveCursorGSVS of
                Nothing -> return ()
                Just gsvs -> do
-                 Control.Concurrent.threadDelay (2 * 1000000)
+                 -- Control.Concurrent.-- threadDelay (2 * 1000000)
                  waitUntilAppCloseSuccessful gss
 
 
@@ -258,7 +258,7 @@ testMemoryUsage gss = do
   -- let config = defaultConfig { configOutputFile = Right $ "./hspec_output.txt" }
   let config = defaultConfig
   pid1 <- logMemPid gss
-  Control.Concurrent.threadDelay (60 * 1000000)
+  -- Control.Concurrent.-- threadDelay (60 * 1000000)
   pid2 <- logMemPid gss
   hspecWith config $ do
     describe "Simula memory usage" $ do
@@ -284,7 +284,7 @@ logMemRecursively :: IO ()
 logMemRecursively = do
   memoryUsage <- getSingleton Godot_OS "OS" >>= G.get_static_memory_usage
   logStr $ "G.get_static_memory_usage: " ++ (show memoryUsage)
-  Control.Concurrent.threadDelay (1 * 1000000)
+  -- Control.Concurrent.-- threadDelay (1 * 1000000)
   logMemRecursively
 
 debugLogDepthFirstSurfaces :: GodotSimulaViewSprite -> IO ()
@@ -353,7 +353,7 @@ debugFunc gss = do
   (catch :: IO a -> (System.Exit.ExitCode -> IO a) -> IO a) (do -- testPopups gss
                                                                 -- testMemoryUsage gss
                                                                 -- testMemoryUsageWithApp gss "firefox" (60*1)
-                                                                Control.Concurrent.threadDelay (round (4 * 1000000))
+                                                                -- Control.Concurrent.-- threadDelay (round (4 * 1000000))
                                                                 debugTerminateSimula gss
                                                             )
                                                             (\e -> debugTerminateSimula gss)

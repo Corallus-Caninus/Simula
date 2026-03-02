@@ -109,36 +109,74 @@
           # | pkgs.xclip               |
           # | pkgs.curl                |
           # | pkgs.i3status            |
+          simula-src = pkgs.stdenv.mkDerivation {
+            pname = "simula-src";
+            version = "0.0.0-dev";
+            src = ./.;
+            installPhase = ''
+              mkdir -p $out
+              cp -rv . $out/
+            '';
+          };
+
           simula = pkgs.stdenv.mkDerivation rec {
             pname = "simula";
             version = "0.0.0-dev";
 
-            # `lib.cleanSource` omits `.so` files such as `addons/gdleapmotion/bin/x11/libgdleapmotion.so`
-            #src = lib.cleanSource ./.;
-            src = lib.cleanSourceWith {
-              filter = cleanSourceFilter;
-              src = ./.;
-            };
-
-            nativeBuildInputs = [ pkgs.autoPatchelfHook ];
+            nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.makeWrapper ];
 
             buildInputs = [
               haskell-dependencies
+              "${godot-haskell-plugin}/lib/ghc-9.6.5/lib"
+              "${godot-haskell-plugin}/lib/ghc-9.6.5/lib/x86_64-linux-ghc-9.6.5"
+              "${haskell-dependencies}/lib"
+              inputs.godot.packages."${system}".godot
               pkgs.systemd
               pkgs.openxr-loader
+              pkgs.libuuid
+              pkgs.libGL
+              pkgs.libvdpau
+              pkgs.libglvnd
+              pkgs.xorg.libxcb
+              pkgs.xorg.libXau
+              pkgs.xorg.libXdmcp
+              pkgs.xorg.libXmu
+              pkgs.xorg.libSM
+              pkgs.xorg.libICE
+              pkgs.glib
+              pkgs.mesa
+              pkgs.libepoxy
+              pkgs.vulkan-loader
+              pkgs.xorg.libXres
+              pkgs.xorg.libXrender
+              pkgs.xorg.libXcomposite
+              pkgs.xorg.libXcursor
+              pkgs.xorg.libXdamage
+              pkgs.xorg.libXi
+              pkgs.xorg.libXtst
             ];
 
-            dontBuild = true;
+            dontUnpack = true;
 
             installPhase = ''
               runHook preInstall
 
               mkdir -p $out/opt/simula
-              cp -r $src/* $src/.??* $out/opt/simula
+              cp -a ${simula-src}/. $out/opt/simula/
+              chmod -R +w $out/opt/simula
 
-              # Install godot-haskell-plugin from the result by currently source code
+              # Overlay our freshly built plugin
+              cp -v ${godot-haskell-plugin}/lib/ghc-9.6.5/lib/libgodot-haskell-plugin.so $out/opt/simula/addons/godot-haskell-plugin/bin/x11/libgodot-haskell-plugin.so
               chmod 755 $out/opt/simula/addons/godot-haskell-plugin/bin/x11/libgodot-haskell-plugin.so
-              find ${godot-haskell-plugin} -name libgodot-haskell-plugin.so | xargs -i cp {} $out/opt/simula/addons/godot-haskell-plugin/bin/x11/libgodot-haskell-plugin.so
+
+              # Ensure dependencies are found
+              addAutoPatchelfSearchPath ${haskell-dependencies}/lib
+              addAutoPatchelfSearchPath ${godot-haskell-plugin}/lib/ghc-9.6.5/lib
+              addAutoPatchelfSearchPath ${godot-haskell-plugin}/lib/ghc-9.6.5/lib/x86_64-linux-ghc-9.6.5
+              
+              autoPatchelf $out/opt/simula
+              echo "DEBUG: contents of $out after autoPatchelf:"
+              ls -R $out
 
               # Install Simula runner
               mkdir -p $out/bin
@@ -151,9 +189,13 @@
               export PATH="${
                 lib.makeBinPath [
                   inputs.godot.packages."${system}".godot
+                  pkgs.xwayland
                   pkgs.xpra
                   pkgs.xfce.xfce4-terminal
+                  pkgs.kitty
+                  pkgs.xterm
                   pkgs.xorg.xrdb
+                  pkgs.xorg.setxkbmap
                   pkgs.wmctrl
                   pkgs.ffmpeg
                   pkgs.midori
@@ -163,6 +205,9 @@
                   pkgs.xclip
                   pkgs.curl
                   pkgs.i3status
+                  pkgs.procps
+                  pkgs.bottom
+                  pkgs.steam-run
                 ]
               }:$PATH"
 
@@ -175,20 +220,45 @@
               export SIMULA_LOG_DIR="$XDG_CACHE_HOME/Simula"
               export SIMULA_DATA_DIR="$XDG_DATA_HOME/Simula"
               export SIMULA_CONFIG_DIR="$XDG_CONFIG_HOME/Simula"
+              export SIMULA_APP_DIR="'$out'/bin"
 
               if grep -qi NixOS /etc/os-release; then
-                godot -m ${simula.src}/project.godot
+                if command -v steam-run > /dev/null; then
+                  echo "NixOS detected. Running Simula with steam-run..."
+                  steam-run env \
+                    SIMULA_LOG_DIR="$SIMULA_LOG_DIR" \
+                    SIMULA_DATA_DIR="$SIMULA_DATA_DIR" \
+                    SIMULA_CONFIG_DIR="$SIMULA_CONFIG_DIR" \
+                    SIMULA_APP_DIR="$SIMULA_APP_DIR" \
+                    XKB_DEFAULT_LAYOUT="us" \
+                    XKB_DEFAULT_VARIANT="" \
+                    XKB_DEFAULT_OPTIONS="" \
+                    XKB_CONFIG_ROOT="${pkgs.xorg.xkeyboardconfig}/share/X11/xkb" \
+                    XR_RUNTIME_JSON="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json" \
+                    godot -m "'$out'"/opt/simula/project.godot
+                else
+                  export XR_RUNTIME_JSON="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
+                  export XKB_DEFAULT_LAYOUT="us"
+                  export XKB_DEFAULT_VARIANT=""
+                  export XKB_DEFAULT_OPTIONS=""
+                  export XKB_CONFIG_ROOT="${pkgs.xorg.xkeyboardconfig}/share/X11/xkb"
+                  godot -m "'$out'"/opt/simula/project.godot
+                fi
               else
                 echo "Detects non-NixOS distribution. Running Simula with nixGL..."
-                nix run --impure github:nix-community/nixGL -- godot -m ${simula.src}/project.godot
+                nix run --impure github:nix-community/nixGL -- godot -m "'$out'"/opt/simula/project.godot
               fi' > $out/bin/simula
               chmod 766 $out/bin/simula
 
-              # Install some tools
+              # Symlink tools for Haskell code to find via SIMULA_APP_DIR or PATH
+              mkdir -p $out/bin
               ln -s ${pkgs.xpra}/bin/xpra $out/bin/xpra
               ln -s ${pkgs.xfce.xfce4-terminal}/bin/xfce4-terminal $out/bin/xfce4-terminal
+              ln -s ${pkgs.kitty}/bin/kitty $out/bin/kitty
+              ln -s ${pkgs.xterm}/bin/xterm $out/bin/xterm
               ln -s ${pkgs.xorg.xrdb}/bin/xrdb $out/bin/xrdb
               ln -s ${pkgs.wmctrl}/bin/wmctrl $out/bin/wmctrl
+              ln -s ${pkgs.i3status}/bin/i3status $out/bin/i3status
               ln -s ${pkgs.ffmpeg-full}/bin/ffplay $out/bin/ffplay
               ln -s ${pkgs.ffmpeg-full}/bin/ffmpeg $out/bin/ffmpeg
               ln -s ${pkgs.midori}/bin/midori $out/bin/midori
@@ -199,7 +269,10 @@
               ln -s ${pkgs.patchelf}/bin/patchelf $out/bin/patchelf
               ln -s ${pkgs.dialog}/bin/dialog $out/bin/dialog
               ln -s ${pkgs.curl}/bin/curl $out/bin/curl
-              ln -s ${pkgs.i3status}/bin/i3status $out/bin/i3status
+
+              # Ensure .Xdefaults and config are in the right place for Haskell code
+              cp -v ${simula-src}/.Xdefaults $out/.Xdefaults || true
+              cp -rv ${simula-src}/config $out/config || true
 
               runHook postInstall
             '';

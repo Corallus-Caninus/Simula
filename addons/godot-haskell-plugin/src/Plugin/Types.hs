@@ -20,6 +20,8 @@ import           Path.IO
 
 import           Data.Time.Clock
 import           Data.Maybe
+import qualified System.Posix.User
+import           Text.Read (readMaybe)
 import           System.Environment (lookupEnv)
 import           Control.Concurrent
 import           Control.Monad
@@ -191,6 +193,9 @@ data HUD = HUD
   , _hudSvrTexture   :: GodotTexture
   , _hudDynamicFont  :: GodotDynamicFont
   , _hudI3Status     :: String
+  , _hudLastI3Status :: String
+  , _hudLastWorkspaceStatus :: String
+  , _hudMemoryUsage  :: Float
   }
 
 data PhysicsBodyConfig = PhysicsBodyConfig
@@ -436,8 +441,6 @@ addChild :: (GodotNode :< parent)
          -> child
          -> IO ()
 addChild parent child = do
-
-  -- instance Method "add_child" GodotNode (GodotNode -> Bool -> IO ())
   G.add_child ((safeCast parent) :: GodotNode )
               ((safeCast child) :: GodotNode)
               True -- Sets legible_unique_name flag to True
@@ -911,17 +914,48 @@ appLaunch gss appStr maybeLocation = do
     (_, Nothing) -> putStrLn "No DISPLAY found!" >> (return $ fromInteger 0)
     (_, (Just xwaylandDisplay)) -> do
       let envMap = M.fromList originalEnv
-      let envMapWithDisplay = M.insert "DISPLAY" xwaylandDisplay envMap
+      maybeXdgRuntime <- lookupEnv "XDG_RUNTIME_DIR"
+      maybeHome <- lookupEnv "HOME"
+      maybeUser <- lookupEnv "USER"
+      uid <- System.Posix.User.getRealUserID
+      let xdgRuntimeFallback = "/run/user/" ++ (show uid)
+      
+      let envMap' = case maybeXdgRuntime of
+                      Just xdg -> M.insert "XDG_RUNTIME_DIR" xdg envMap
+                      Nothing -> M.insert "XDG_RUNTIME_DIR" xdgRuntimeFallback envMap
+      let envMap'' = case maybeHome of
+                       Just home -> M.insert "HOME" home envMap'
+                       Nothing -> envMap'
+      let envMap''' = case maybeUser of
+                        Just user -> M.insert "USER" user (M.insert "LOGNAME" user envMap'')
+                        Nothing -> envMap''
+      
+      let envMapWithTerm = M.insert "TERM" "xterm-256color" envMap'''
+      let envMapWithDisplay = M.insert "DISPLAY" xwaylandDisplay envMapWithTerm
+      let envMapWithLayout = M.insert "XKB_DEFAULT_LAYOUT" "us" (M.insert "XKB_DEFAULT_VARIANT" "" envMapWithDisplay)
       let envMapWithWaylandDisplay = case maybeLocation of
-            Just location -> M.insert "SIMULA_STARTING_LOCATION" location (M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithDisplay)
-            Nothing -> (M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithDisplay)
+            (Just location) -> M.insert "SIMULA_STARTING_LOCATION" location (M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithLayout)
+            (Nothing)       -> (M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithLayout)
+      
       let envListWithDisplays = M.toList envMapWithWaylandDisplay
+      putStrLn $ "appLaunch: running " ++ appStr
+      putStrLn $ "appLaunch: DISPLAY=" ++ (fromMaybe "NONE" $ M.lookup "DISPLAY" envMapWithWaylandDisplay)
+      putStrLn $ "appLaunch: WAYLAND_DISPLAY=" ++ (fromMaybe "NONE" $ M.lookup "WAYLAND_DISPLAY" envMapWithWaylandDisplay)
+      putStrLn $ "appLaunch: HOME=" ++ (fromMaybe "NONE" $ M.lookup "HOME" envMapWithWaylandDisplay)
+      
       res <- Control.Exception.Safe.try $ createProcess (shell appStr) { env = Just envListWithDisplays, new_session = True } :: IO (Either IOException (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle))
       pid <- case res of
-                  Left _ -> return $ fromInteger 0
+                  Left e -> do
+                    putStrLn $ "appLaunch: failed to start " ++ appStr ++ ": " ++ show e
+                    return $ fromInteger 0
                   Right (_, _, _, processHandle) -> do maybePid <- System.Process.getPid processHandle
                                                        case maybePid of
-                                                            Just pid -> return pid
+                                                            Just pid -> do
+                                                              putStrLn $ "appLaunch: started " ++ appStr ++ " with pid " ++ show pid
+                                                              forkIO $ do
+                                                                exitCode <- waitForProcess processHandle
+                                                                putStrLn $ "appLaunch: process " ++ appStr ++ " (pid " ++ show pid ++ ") exited with " ++ show exitCode
+                                                              return pid
                                                             Nothing -> return $ fromInteger $ 0
       startingAppPids <- readTVarIO (gss ^. gssStartingAppPids)
       case maybeLocation of
@@ -956,7 +990,10 @@ terminalLaunch :: GodotSimulaServer -> Maybe String -> IO ProcessID
 terminalLaunch gss maybeLocation = do
   maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
   let appDir = fromMaybe "./result/bin" maybeAppDir
-  appLaunch gss (appDir ++ "/xfce4-terminal") maybeLocation
+  terminalPath <- System.Directory.doesFileExist (appDir ++ "/xfce4-terminal") >>= \case
+    True -> return (appDir ++ "/xfce4-terminal")
+    False -> return "xfce4-terminal"
+  appLaunch gss (terminalPath ++ " --disable-server -e \"bash -i\"") maybeLocation
 
 getTextureFromURL :: String -> IO (Maybe GodotTexture)
 getTextureFromURL urlStr = do
@@ -1411,7 +1448,8 @@ getParentPid pid = do
     Right xs ->
       case Data.List.lines xs of
         [ws] -> case Data.List.words ws of
-          (_:_:_:ppid:_) -> return . Just . Prelude.read $ ppid
+          (_:_:_:ppid:_) -> return $ readMaybe ppid
+          _ -> return Nothing
     _ -> return Nothing
 
 getParentsPids :: ProcessID  -> IO [ProcessID]
@@ -1708,11 +1746,10 @@ logMemPid :: GodotSimulaServer -> IO Float
 logMemPid gss = do
   let pid = (gss ^. gssPid)
   (_, out', _) <- System.Process.readCreateProcessWithExitCode (shell $ "ps -p " ++ pid ++ " -o rss=") ""
-  let pidMem = Prelude.read $ out' :: Float
-  -- logStr $ "PID mem: " ++ (show pidMem)
-  -- Control.Concurrent.threadDelay (1 * 1000000)
-  -- logMemPid gss
-  return (pidMem / 1000) -- return ~MB
+  let maybeMem = listToMaybe (Prelude.words out') >>= readMaybe :: Maybe Float
+  case maybeMem of
+    Just pidMem -> return (pidMem / 1000)
+    Nothing -> return 0.0 -- return ~MB
 
 forkUpdateHUDRecursively :: GodotSimulaServer -> IO ()
 forkUpdateHUDRecursively gss = do
@@ -1729,17 +1766,18 @@ forkUpdateHUDRecursively gss = do
   let hudConfigPath = configDir </> "HUD.config"
   
   configExists <- System.Directory.doesFileExist hudConfigPath
+  let simulaNixDir = takeDirectory appDir
   unless configExists $ do
     -- Copy default HUD config from Nix store
-    let defaultHudConfig = appDir </> "config" </> "HUD.config"
+    let defaultHudConfig = simulaNixDir </> "config" </> "HUD.config"
     createDirectoryIfMissing True configDir
     System.Directory.copyFile defaultHudConfig hudConfigPath
+    putStrLn $ "Using config file: " ++ hudConfigPath
 
-  let i3statusPath = appDir </> "i3status"
-  
+  i3statusPathExists <- System.Directory.doesFileExist (appDir </> "i3status")
+  let i3statusPath = if i3statusPathExists then (appDir </> "i3status") else "i3status"
   putStrLn $ "Attempting to run i3status from: " ++ i3statusPath
-  putStrLn $ "Using config file: " ++ hudConfigPath
-  
+
   res <- try $ System.IO.Streams.runInteractiveProcess 
     i3statusPath
     ["-c", hudConfigPath] 
@@ -1748,60 +1786,39 @@ forkUpdateHUDRecursively gss = do
 
   case res of
     Left e -> putStrLn $ "Error starting i3status: " ++ show (e :: IOException)
-    Right processInfo -> do
-      forkIO $ updateHUDRecursively gss processInfo
+    Right (_,out,err,pid) -> do
+      out' <- System.IO.Streams.Text.decodeUtf8 out
+      err' <- System.IO.Streams.Text.decodeUtf8 err
+      _ <- forkIO $ do
+        forever $ do
+          maybeLine <- System.IO.Streams.Internal.read err'
+          case maybeLine of
+            Just line -> putStrLn $ "i3status stderr: " ++ (unpack line)
+            Nothing -> return ()
+      _ <- forkIO $ updateHUDRecursively gss out'
       return ()
+  return ()
 
   where
-    updateHUDRecursively :: GodotSimulaServer -> (System.IO.Streams.OutputStream B.ByteString, System.IO.Streams.InputStream B.ByteString, System.IO.Streams.InputStream B.ByteString, ProcessHandle) -> IO ()
-    updateHUDRecursively gss res@(inp,out,err,pid) = do
-      updateWorkspaceHUD gss
-      updatei3StatusHUD gss res
-      updateHUDRecursively gss res
+    updateHUDRecursively :: GodotSimulaServer -> System.IO.Streams.InputStream Text -> IO ()
+    updateHUDRecursively gss out' = do
+      updatei3StatusHUD gss out'
+      mem <- logMemPid gss
+      atomically $ modifyTVar (gss ^. gssHUD) (\h -> h { _hudMemoryUsage = mem })
+      updateHUDRecursively gss out'
       
-updateWorkspaceHUD :: GodotSimulaServer -> IO ()
-updateWorkspaceHUD gss = do
-  (currentWorkspace, currentWorkspaceStr) <- readTVarIO (gss ^. gssWorkspace)
+updatei3StatusHUD :: GodotSimulaServer -> System.IO.Streams.InputStream Text -> IO ()
+updatei3StatusHUD gss out' = do
   hud <- readTVarIO (gss ^. gssHUD)
-  let canvasLayer = (hud ^. hudCanvasLayer)
-  let rtLabelW = (hud ^. hudRtlWorkspace)
-  let svr = (hud ^. hudSvrTexture)
-  let dynamicFont = (hud ^. hudDynamicFont)
-  fps <- getSingleton Godot_Engine "Engine" >>= (\engine -> G.get_frames_per_second engine)
-  simulaMemoryUsage <- logMemPid gss
-  screenRecorder <- readTVarIO (gss ^. gssScreenRecorder)
-
-  G.clear rtLabelW
-  G.push_font rtLabelW (safeCast dynamicFont)
-  G.append_bbcode rtLabelW `withGodotString` (pack currentWorkspaceStr)
-  G.append_bbcode rtLabelW `withGodotString` " | "
-  G.add_image rtLabelW svr 19 19
-  G.append_bbcode rtLabelW `withGodotString` " "
-  G.append_bbcode rtLabelW `withGodotString` (pack $ (show $ round fps) ++ " FPS ")
-  G.append_bbcode rtLabelW `withGodotString` (pack ("@ " ++ (show $ round simulaMemoryUsage) ++ " MB"))
-  G.append_bbcode rtLabelW `withGodotString` " |"
-  case screenRecorder of
-    Nothing -> return ()
-    Just ph -> do
-      redColor <- (toLowLevel $ (rgb 1.0 0.0 0.0) `withOpacity` 1.0) :: IO GodotColor
-      G.push_color rtLabelW redColor
-      G.append_bbcode rtLabelW `withGodotString` " ⚬ "
-      G.pop rtLabelW
-      return ()
-  G.pop rtLabelW
-
-updatei3StatusHUD :: GodotSimulaServer -> (OutputStream B.ByteString, InputStream B.ByteString, InputStream B.ByteString, ProcessHandle) -> IO ()
-updatei3StatusHUD gss res@(inp,out,err,pid) = do
-  hud <- readTVarIO (gss ^. gssHUD)
-  out' <- System.IO.Streams.Text.decodeUtf8 out
   maybeLine <- System.IO.Streams.Internal.read out' :: IO (Maybe Text)
   let newHudStatus = case maybeLine of
         Just line -> unpack line
         Nothing -> "...no HUD data available...!"
-  let hudNew = hud { _hudI3Status = newHudStatus }
-  atomically $ writeTVar (gss ^. gssHUD) hudNew
-  when (isNothing maybeLine) $
-    putStrLn "No data read from i3status output"
+  
+  when (newHudStatus /= (hud ^. hudI3Status)) $ do
+    let hudNew = hud { _hudI3Status = newHudStatus }
+    atomically $ writeTVar (gss ^. gssHUD) hudNew
+    
   return ()
 
 withGodotString :: (GodotString -> IO a) -> Text -> IO a

@@ -99,7 +99,7 @@ getKeyboardAction gss keyboardShortcut =
     "clickRight" -> rightClick
     "scrollUp" -> scrollUp gss
     "scrollDown" -> scrollDown gss
-    "launchTerminal" -> shellLaunch gss "xfce4-terminal"
+    "launchTerminal" -> \_ isPressed -> when isPressed $ (terminalLaunch gss (Just "center") >> return ())
     "launchXrpa" -> launchXpra' gss
     "toggleGrabMode" -> toggleGrabMode'
     "launchHMDWebCam" -> launchHMDWebCam' gss
@@ -559,7 +559,6 @@ getKeyboardAction gss keyboardShortcut =
           -- Swap workspace in scene graph
           removeChild gss currentWorkspace
           addChild gss newWorkspace
-          updateWorkspaceHUD gss
         switchToWorkspace _ _ _ _ = return ()
 
         sendToWorkspace :: GodotSimulaServer -> Int -> SpriteLocation -> Bool -> IO ()
@@ -687,27 +686,64 @@ instance NativeScript GodotSimulaServer where
 
 process :: GodotSimulaServer -> [GodotVariant] -> IO ()
 process gss [deltaGV] = do
-
+  -- putStrLn "SimulaServer.process start"
   wasdMode <- readTVarIO (gss ^. gssWasdMode)
   delta <- fromGodotVariant deltaGV :: IO Float
-  wasdMode <- readTVarIO (gss ^. gssWasdMode)
   when wasdMode $ processWASDMovement gss delta
 
   -- Update Simula HUD
   hud <- readTVarIO (gss ^. gssHUD)
-  let canvasLayer = (hud ^. hudCanvasLayer)
-  let rtLabel = (hud ^. hudRtlI3)
-  let dynamicFont = (hud ^. hudDynamicFont)
+  (currentWorkspace, currentWorkspaceStr) <- readTVarIO (gss ^. gssWorkspace)
+  fps <- getSingleton Godot_Engine "Engine" >>= (\engine -> G.get_frames_per_second engine)
+  let simulaMemoryUsage = (hud ^. hudMemoryUsage)
+  screenRecorder <- readTVarIO (gss ^. gssScreenRecorder)
+
+  let workspaceStatus = currentWorkspaceStr ++ (show $ round fps) ++ (show $ round simulaMemoryUsage) ++ (show $ isJust screenRecorder)
   let i3status = (hud ^. hudI3Status)
-  G.clear rtLabel
-  G.push_font rtLabel (safeCast dynamicFont)
-  G.push_align rtLabel 2
-  G.append_bbcode rtLabel `withGodotString` (pack i3status)
-  G.pop rtLabel
-  G.pop rtLabel
+
+  -- Update Workspace HUD if changed
+  when (workspaceStatus /= (hud ^. hudLastWorkspaceStatus)) $ do
+    -- putStrLn $ "Updating Workspace HUD: " ++ workspaceStatus
+    let rtLabelW = (hud ^. hudRtlWorkspace)
+    let svr = (hud ^. hudSvrTexture)
+    let dynamicFont = (hud ^. hudDynamicFont)
+    G.clear rtLabelW
+    G.push_font rtLabelW (safeCast dynamicFont)
+    G.append_bbcode rtLabelW `withGodotString` (pack currentWorkspaceStr)
+    G.append_bbcode rtLabelW `withGodotString` " | "
+    G.add_image rtLabelW svr 19 19
+    G.append_bbcode rtLabelW `withGodotString` " "
+    G.append_bbcode rtLabelW `withGodotString` (pack $ (show $ round fps) ++ " FPS ")
+    G.append_bbcode rtLabelW `withGodotString` (pack ("@ " ++ (show $ round simulaMemoryUsage) ++ " MB"))
+    G.append_bbcode rtLabelW `withGodotString` " |"
+    case screenRecorder of
+      Nothing -> return ()
+      Just ph -> do
+        redColor <- (toLowLevel $ (rgb 1.0 0.0 0.0) `withOpacity` 1.0) :: IO GodotColor
+        G.push_color rtLabelW redColor
+        G.append_bbcode rtLabelW `withGodotString` " ⚬ "
+        G.pop rtLabelW
+        return ()
+    G.pop rtLabelW
+    atomically $ modifyTVar (gss ^. gssHUD) (\h -> h { _hudLastWorkspaceStatus = workspaceStatus })
+
+  -- Update i3status HUD if changed
+  when (i3status /= (hud ^. hudLastI3Status)) $ do
+    -- putStrLn $ "Updating i3status HUD: " ++ i3status
+    let rtLabel = (hud ^. hudRtlI3)
+    let dynamicFont = (hud ^. hudDynamicFont)
+    G.clear rtLabel
+    G.push_font rtLabel (safeCast dynamicFont)
+    G.push_align rtLabel 2
+    G.append_bbcode rtLabel `withGodotString` (pack i3status)
+    G.pop rtLabel
+    G.pop rtLabel
+    atomically $ modifyTVar (gss ^. gssHUD) (\h -> h { _hudLastI3Status = i3status })
+  -- putStrLn "SimulaServer.process end"
 
 ready :: GodotSimulaServer -> [GodotVariant] -> IO ()
 ready gss _ = do
+  putStrLn "!!!!!! SimulaServer.ready STARTING !!!!!!"
   debugModeMaybe <- lookupEnv "DEBUG"
   rrModeMaybe <- lookupEnv "RUNNING_UNDER_RR"
   maybeLogDir <- lookupEnv "SIMULA_LOG_DIR"
@@ -767,17 +803,26 @@ ready gss _ = do
   maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
   let appDir = fromMaybe "./result/bin" maybeAppDir
   let simulaNixDir = takeDirectory appDir
-  let command = appDir ++ "/xrdb -merge " ++ simulaNixDir ++ "/.Xdefaults"
+
+  xrdbPath <- doesFileExist (appDir ++ "/xrdb") >>= \case
+    True -> return (appDir ++ "/xrdb")
+    False -> return "xrdb"
+
+  let command = xrdbPath ++ " -merge " ++ simulaNixDir ++ "/.Xdefaults"
   createProcess (shell command) { env = Just [("DISPLAY", newDisplay)] }
+
+  wmctrlPath <- doesFileExist (appDir ++ "/wmctrl") >>= \case
+    True -> return (appDir ++ "/wmctrl")
+    False -> return "wmctrl"
 
   case rrModeMaybe of
     Just "1" -> return ()
-    _ -> do (_, windows', _) <- B.readCreateProcessWithExitCode (shell (appDir ++ "/wmctrl -lp")) ""
+    _ -> do (_, windows', _) <- B.readCreateProcessWithExitCode (shell (wmctrlPath ++ " -lp")) ""
             let windows = (B.unpack windows')
             let rightWindows = filter (\line -> isInfixOf (show pid) line) (lines windows)
             when (length rightWindows > 0 && length (words $ head rightWindows) > 0)$ do
               let simulaWindow = (head . words . head) rightWindows
-              createProcess ((shell $ appDir ++ "/wmctrl -ia " ++ simulaWindow) { env = Just [("DISPLAY", oldDisplay)] })
+              createProcess ((shell $ wmctrlPath ++ " -ia " ++ simulaWindow) { env = Just [("DISPLAY", oldDisplay)] })
               return ()
 
   -- Adding a `WorldEnvironment` anywhere to an active scene graph
@@ -790,14 +835,26 @@ ready gss _ = do
   workspacePersistent <- readTVarIO (gss ^. gssWorkspacePersistent)
   addChild gss workspacePersistent
 
-  -- Launch default apps
+  -- Launch default apps (with polling instead of threadDelay)
   sApps <- readTVarIO (gss ^. gssStartingApps)
-  launchDefaultApps sApps "center"
-  putStrLn $ "Launching default apps: " ++ (show sApps)
+  _ <- forkIO $ do
+    let waitForXwayland 0 = putStrLn "XWayland never became ready, giving up on default apps."
+        waitForXwayland n = do
+          exists <- System.Directory.doesFileExist "/run/user/1000/simula-0"
+          if exists
+            then do
+              putStrLn "XWayland ready, launching default apps."
+              launchDefaultApps sApps "center"
+            else do
+              Control.Concurrent.yield
+              waitForXwayland (n - 1)
+    waitForXwayland 1000000 -- Poll many times since we yield instead of sleep
+  putStrLn $ "Queued default apps launch: " ++ (show sApps)
 
   case debugModeMaybe of
     Nothing -> return ()
-    Just debugModeVal  -> (forkIO $ debugFunc gss) >> return ()
+    -- Just debugModeVal  -> (forkIO $ debugFunc gss) >> return ()
+    Just debugModeVal  -> return ()
 
   hud <- readTVarIO (gss ^. gssHUD)
   let canvasLayer = (hud ^. hudCanvasLayer)
@@ -1119,6 +1176,9 @@ initGodotSimulaServer obj = do
         , _hudSvrTexture = svr          :: GodotTexture
         , _hudDynamicFont = dynamicFont :: GodotDynamicFont
         , _hudI3Status = ""             :: String
+        , _hudLastI3Status = " "        :: String
+        , _hudLastWorkspaceStatus = " " :: String
+        , _hudMemoryUsage = 0.0         :: Float
       }
       gssHUD' <- newTVarIO hud
 
@@ -1260,8 +1320,11 @@ _on_WlrXdgShell_new_surface gss [wlrXdgSurfaceVariant] = do
 
 _on_wlr_key :: GodotSimulaServer -> [GodotVariant] -> IO ()
 _on_wlr_key gss [keyboardGVar, eventGVar] = do
+  event <- fromGodotVariant eventGVar :: IO GodotWlrEventKeyboardKey
+  -- time <- G.get_time_msec event
+  -- key <- G.get_keycode event
+  -- putStrLn $ "_on_wlr_key: time=" ++ show time ++ " key=" ++ show key
   wlrSeat <- readTVarIO (gss ^. gssWlrSeat)
-  event <- fromGodotVariant eventGVar
   G.reference event
   G.keyboard_notify_key wlrSeat event
   return ()
@@ -1274,6 +1337,7 @@ _on_wlr_modifiers gss [keyboardGVar] = do
 
 _on_WlrXWayland_new_surface :: GodotSimulaServer -> [GodotVariant] -> IO ()
 _on_WlrXWayland_new_surface gss [wlrXWaylandSurfaceVariant] = do
+  putStrLn "_on_WlrXWayland_new_surface"
   wlrXWaylandSurface <- (fromGodotVariant wlrXWaylandSurfaceVariant :: IO GodotWlrXWaylandSurface) >>= validateSurfaceE
   G.reference wlrXWaylandSurface
   simulaView <- newSimulaView gss wlrXWaylandSurface

@@ -624,10 +624,15 @@ _handle_destroy gsvs [gsvsGV] = do
   deleteSurface eitherSurface -- Causing issues with rr
 
   where
-    deleteSurface eitherSurface =
+    deleteSurface eitherSurface = do
+      putStrLn "deleteSurface"
       case eitherSurface of
-        (Left xdgSurface) -> destroyMaybe (safeCast xdgSurface)
-        (Right xwaylandSurface) -> destroyMaybe (safeCast xwaylandSurface)
+        (Left xdgSurface) -> do
+          putStrLn "deleteSurface: xdg"
+          destroyMaybe (safeCast xdgSurface)
+        (Right xwaylandSurface) -> do
+          putStrLn "deleteSurface: xwayland"
+          destroyMaybe (safeCast xwaylandSurface)
 
 -- | Push the gsvs by `dist` units along its object-local z-axis. Negative values of `dist`
 -- | push the gsvs away from the user; positive values of `dist` push the gsvs
@@ -922,12 +927,13 @@ handle_unmap_free_child self args@[wlrXWaylandSurfaceVariant] = do
 
 handle_unmap_base :: GodotSimulaViewSprite -> [GodotVariant] -> IO ()
 handle_unmap_base self [wlrXWaylandSurfaceVariant] = do
-  putStrLn "handle_unmap_base"
+  putStrLn "handle_unmap_base start"
   gss <- readTVarIO (self ^. gsvsServer)
   simulaView <- atomically $ readTVar (self ^. gsvsView)
   freeChildrenMap <- readTVarIO (gss ^. gssFreeChildren)
   wlrXWaylandSurface <- (fromGodotVariant wlrXWaylandSurfaceVariant :: IO GodotWlrXWaylandSurface) >>= validateSurfaceE
 
+  putStrLn "handle_unmap_base: keyboardGrabLetGo"
   keyboardGrabLetGo gss (GrabWindow self undefined)
   keyboardGrabLetGo gss (GrabWindows undefined)
   keyboardGrabLetGo gss (GrabWorkspaces undefined)
@@ -958,13 +964,18 @@ handle_unmap_base self [wlrXWaylandSurfaceVariant] = do
                       if (simulaViewFocused == simulaView) then (atomically $ writeTVar (gss ^. gssKeyboardFocusedSprite) Nothing)
                                                           else (return ())
 
+  putStrLn "handle_unmap_base: set_process false"
   G.set_process self False
   atomically $ writeTVar (simulaView ^. svMapped) False
+  putStrLn "handle_unmap_base: check scene graph"
   isInSceneGraph <- G.is_a_parent_of ((safeCast gss) :: GodotNode ) ((safeCast self) :: GodotNode)
   atomically $ writeTVar (self ^. gsvsIsDamaged) True
   case isInSceneGraph of
-       True -> removeChild gss self
+       True -> do
+         putStrLn "handle_unmap_base: remove_child"
+         removeChild gss self
        False -> return ()
+  putStrLn "handle_unmap_base end"
 
 getXWaylandSubsurfaceAndCoords :: GodotSimulaViewSprite -> GodotWlrXWaylandSurface -> SurfaceLocalCoordinates -> IO (GodotWlrSurface, SubSurfaceLocalCoordinates)
 getXWaylandSubsurfaceAndCoords gsvs wlrXWaylandSurface coords@(SurfaceLocalCoordinates (sx, sy)) = do
