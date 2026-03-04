@@ -1,71 +1,44 @@
+This Simula fork is customized for running Simula on SteamVR with ALVR. specifically on NixOS and for the quest 3. Ensure you have SteamVR and ALVR installed then run the ./setup_config.sh script. a launch_simula_stack.sh script is also provided to automate the process of launching steam ALVR and simula but with race conditions its probably easier to just launch SteamVR, connect it with ALVR then launch simula explicitly with nix run . or nix build . && ./result/bin/simula.
 [[file:./doc/SimulaLogoHorizontal.png]]
-
 [[https://simulavr.com][Simula]] is a VR window manager for Linux that runs on top of [[https://godotengine.org/][Godot]]. It takes less than 1 minute to install.
-
 For the past few years we've been focused primarily on our custom VR computer hardware. Please check our [[https://simulavr.com][website]] for details.
-
 # [[https://d.tube/#!/v/sudoreboot/t026ny0m][file:./doc/SimulaDesktop.png]]
 # [[https://i.imgur.com/zNTYTiG.png]]
-
 [[http://www.youtube.com/watch?v=FWLuwG91HnI][http://img.youtube.com/vi/FWLuwG91HnI/0.jpg]]
-
 *Video:* [[http://www.youtube.com/watch?v=FWLuwG91HnI][Demonstration.]]
-
 *Compatibility:* Simula is officially compatible with SteamVR headsets equipped with Linux drivers (e.g. HTC Vive, HTC Vive Pro, & Valve Index).  We have also added experimental support to OpenXR headsets that have Monado drivers (e.g. North Star, OSVR HDK, and PSVR).  Some people have gotten the Oculus Rift S to run Simula via OpenHMD (see [[https://github.com/OpenHMD/OpenHMD/issues/225#issuecomment-638454156][here]]), though we have not officially tested this ourselves.
-
 *Mission:* Facilitate a Linux future for VR & AR Desktop. In the short-run, this means allowing people to run 2D Linux apps with current generation headsets. In the long-run, this means allowing people to run Linux in standalone AR & VR HMDs.
-
 *Simula One Headset:* We are also in the process of developing a (limited number of) portable VR headsets for sale which come with SimulaVR mounted on them by default.  If you are interested in purchasing one, [[https://simulavr.com][visit our website]] and join our waitlist to receive a place in line and/or periodic updates on its development.
-
 *Origins:* Simula is a reimplementation fork of [[https://github.com/evil0sheep/motorcar][motorcar]]. To read about motorcar, see /[[https://github.com/evil0sheep/MastersThesis/blob/master/thesis.pdf?raw=true][Toward General Purpose 3D User Interfaces: Extending Windowing Systems to Three Dimensions]]/
-
 * Text Quality
-
 A common objection to the viability of VR Desktop is that it exhibits poor text quality; however, with our low pass filter, Simula has taken special care to make text quality as clear as possible:
-
 [[./doc/TextQuality2.gif]]
-
 The left image is a VR terminal /without/ our filter applied; the right is the same image /with/ our filter applied. Compared to other VR Desktops, Simula allows for significantly longer sessions without uncomfortable eye strain.
-
 * Installation
-
 To install Simula on all Linux distros, run:
-
 #+BEGIN_SRC shell
 # You should use cachix to install Simula faster!!
 cachix use simula
-
 # Using Nix flakes
 nix profile install github:SimulaVR/Simula
-
 # Or clone this Git repo, then build Simula!!
 git clone https://github.com/SimulaVR/Simula
 nix build
 #+END_SRC
-
 *Installing Simula should take less than 1 minute:* this script doesn't actually compile anything on your system, but instead downloads the appropriate binaries from our cache in a way that is system and driver agnostic. Under the hood, we (i) check whether you have ~nix~ and ~cachix~ installed (and, if not, install them); (ii) check which graphics drivers you have and (iii) download Simula via ~cachix~ with the appropriate driver flags, falling back to a ~nix~ build if downloading fails.
-
 On NixOS systems, you must ensure
-
 #+BEGIN_SRC
 nix.settings.trusted-users = [ "root" "<your_user_name>"];
 #+END_SRC
-
 is added to your ~configuration.nix~, or the install command above will be unable to download Simula from our cache, instead falling back to a manual build (which takes 1hr+).
-
 # Simula is untested on machines with AMD drivers, though AMD cards running mesa drivers should be supported.
-
 ** OpenXR Backend (Optional)
-
 If you want to avoid using SteamVR, Simula supports an optional OpenXR backend (e.g. [[https://gitlab.freedesktop.org/monado/monado][monado]]).  To use, adjust ~_backend~ from ~OpenVR~ to ~OpenXR~ in ~./config.dhall~.  You will then be required to ensure that an OpenXR runtime (e.g. ~monado-service~) is running on your system before launching Simula.  In addition, you must tell Simula where your ~libopenxr_monado.so~ is located:
-
 #+BEGIN_SRC
 monado-service &
 XR_RUNTIME_JSON=/path/to/your/openxr_monado-dev.json ./result/bin/simula
 #+END_SRC
-
 with ~openxr-dev.json~ encoding the location of your ~libopenxr_monado.so~:
-
 #+BEGIN_SRC json
 {
     "file_format_version": "1.0.0",
@@ -74,43 +47,30 @@ with ~openxr-dev.json~ encoding the location of your ~libopenxr_monado.so~:
     }
 }
 #+END_SRC
-
 ** Updating
-
 To update Simula to the current ~master~ (without losing your configuration adjustments), simply run
-
 #+BEGIN_SRC
 ./source/Helpers.sh && updateSimula
 #+END_SRC
-
 ** COMMENT AppImage
-
 Simula requires ~xpra~, ~xrdb~, ~wmctrl~, and ~terminator~. We keep a bleeding edge ~AppImage~ of Simula synced to a tarball, which can be used as follows:
-
 #+BEGIN_SRC
 wget -c https://www.wolframcloud.com/obj/george.w.singer/SimulaAppImage.tar.gz -O - | tar -xz
 cd ./Simula
 chmod +x ./bin/godot.AppImage
 ./bin/godot.AppImage --path $PWD # launches Simula (requires SteamVR to be running)
 #+END_SRC
-
 ** COMMENT Bleeding Edge Binary
-
  We keep a bleeding edge version of Simula synced to the following tarball:
-
  #+BEGIN_SRC shell
  wget -c https://www.wolframcloud.com/obj/george.w.singer/SimulaBleedingEdge.tar.gz -O - | tar -xz
  cd ./Simula
  ./bin/godot # launches Simula (requires SteamVR to be running)
  #+END_SRC
-
  For installtion troubleshooting, [[https://gitter.im/SimulaVR/Simula][just ask us directly]].
-
 * Usage
 ** Simula Mouse & Keyboard Controls
-
 Windows become "active" once you look at them. Active windows receive typing events from the keyboard, and cursor events from mouse movement.  In addition, the following window-manipulation shortcuts are provided by default into Simula (these can be adjusted by changing ~./config.dhall~):
-
 | *Key binding.*                             | *Action*                                                                                                                        |
 |--------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------|
 | ~Super + Shift + Escape~                   | Terminate Simula                                                                                                                |
@@ -149,140 +109,85 @@ Windows become "active" once you look at them. Active windows receive typing eve
 | ~Shift + PrtSc~                            | Take global screenshot (saved to ~./media/*.png~)                                                                               |
 | ~Super + Shift + PrtSc~                    | Toggle video recording (saved to ~./media/*.mkv~); useful for sending bug reports.                                              |
 | ~Super + r~                                | Reload Simula's configuration (~./config.dhall~)                                                                                |
-
 *NOTE:* In order to prevent Simula's keyboard shortcuts from conflicting with your existing window manager's shortcuts, Simula "grabs" the system keyboard and cursor from your host OS to prevent input events from propagating past Simula. This creates a problem: it is then impossible for you to escape Simula once you launch it! In order to get around this, press ~Super + z~ to ungrab Simula, which will restore mouse and keyboard control to your normal window manager.
-
 ** VR Controllers
-
  [[https://www.evetech.co.za/repository/ProductImages/htc-vive-controller-730px-v1.jpg]]
-
  - *Left-clicking.* Use (7) gently (you don't have to go all the way down to click).
-
  - *Right-clicking.* Use (1).
-
  - *Scrolling.* Scroll up and down via (2).
-
  - *Text dragging.* Hold (7) down and drag.
-
  - *Window manipulation.* Point at a window and, while holding (8), move your controller around. The windows should "levitate" in the direction of your movement.
-
  - *Window rescaling.* Point at a window, hold (8) down, and then scroll up and down on (2).
-
 ** Mouse & Keyboard View
-
 [[https://www.youtube.com/watch?v=D5c3Hfp8Hcw][https://www.wolframcloud.com/obj/george.w.singer/1063512563850488463045946458923996976334308262441.png]]
-
 Simula has a headset [[https://www.youtube.com/watch?v=D5c3Hfp8Hcw][webcam view]] (binded presently to ~Super + w~) that allows you to see your mouse and keyboard from VR.
-
 ** Configuration
-
 - Many things are configurable in Simula. See ~./config/config.dhall~ for a self-documenting list of things to adjust.
 - Simula also uses ~i3status~ to display system information in its HUD.  The default configuration can be found in ~./config/i3status.config~, and can be adjusted [[https://i3wm.org/docs/i3status.html][per these instructions]].
-
 ** COMMENT Recovering Simula Apps
-
 Apps launched in Simula persist across sessions via an [[https://xpra.org/][xpra]] server running on ~DISPLAY=:13~. This means that if Simula exits (perhaps by a sudden crash), all you need to do to recover your apps is to relaunch Simula.
-
 If instead you'd like to access your apps from outside Simula, run
-
 #+BEGIN_SRC shell
 xpra attach :13
 #+END_SRC
-
 and they will appear on your current ~DISPLAY~. Running ~xpra stop~ (or just ~pkill xpra~) is a quick way to kill all apps associated with your Simula session(s).
-
 * Simula One Headset
-
 We are in the process of developing a (limited number of) portable VR headsets for sale which come with SimulaVR mounted on them by default.  If you are interested in purchasing one, [[https://simulavr.com][visit our website]] and join our waitlist to receive a place in line and/or periodic updates on its development.
-
 * Community
-
 For troubleshooting and discussion, join our community at https://discordapp.com/invite/a4PnP7n.
-
 * COMMENT Installation
-
 [[https://gitter.im/SimulaVR/Simula][file:./doc/GitterBadge.png]]
-
 Simula is in alpha phase, and can be difficult to get working on many setups. For help with installation, please visit our [[https://gitter.im/SimulaVR/Simula][chat room]]. Note that Simula has only been tested on Ubuntu 19.04 (Disco Dingo), but the instructions below should in principle work on (i) older versions of Ubuntu and/or other distros that use ~apt~ (i.e., Debian) or (ii) Arch Linux (or distros that use ~pacman~).
-
 1. *Clone Simula and install its dependencies.* Depending upon your distro, you'll need to run some combination of ~make ubuntu~, ~make arch~, ~make nvidia~ and ~make amd~.
-
   #+BEGIN_SRC shell
   git clone --recursive https://github.com/SimulaVR/Simula
   cd Simula
-
   make ubuntu    # Installs needed packages via apt-get
   # make arch    # Installs needed packages via pacman
   #+END_SRC
-
 2. *Compile Simula.* Warning: this can take a while.
-
   #+BEGIN_SRC  shell
   make all
   #+END_SRC
-
 3. *Launch Simula.* You must first launch SteamVR before you can run Simula.
-
   #+begin_src shell
   steam &        # First launch SteamVR from steam
   make run       # ..then launch Simula
   #+end_src
-
 4. *Launch some apps.* Once Simula starts, launch some Wayland apps to interact with (at this point Simula only supports Wayland apps).  Apps must be launched with ~WAYLAND_DISPLAY~ set to ~simula-0~.
-
   #+begin_src shell
   WAYLAND_DISPLAY=simula-0 sakura   # Wayland-based terminal
   WAYLAND_DISPLAY=simula-0 epiphany # Wayland-based web browser
   #+end_src
-
 * COMMENT Troubleshooting
-
 Any errors can be immediately helped with in [[https://gitter.im/SimulaVR/Simula][Simula's chatroom]]. Here are some helpers though:
-
 1. *Driver errors.* If you get driver related errors, try running ~make nvidia~ or ~make amd~ to try to upgrade to the latest drivers for your respective video card. These helpers only work on Ubuntu/Arch:
-
   #+begin_src shell
   make nvidia # If needed: installs nvidia-driver-418 (via apt-get)
   make amd    # If needed: installs mesa-vulkan-drivers and other packages for SteamVR on AMD (via apt-get)
   #+end_src
-
 2. *Godot errors.* If you get godot related errors, trying rebuilding ~godot~ from scratch:
-
   #+begin_src shell
   make godot
   #+end_src
-
 3. *Wlroots errors.* If you get wrloots related errors (i.e., any error that complains about missing ~wlr_*~ references), try rebuilding wlroots from scratch:
-
   #+begin_src
   make wlroots   # If you have trouble launching Simula, try recompiling Godot via this command.
   #+end_src
-
 4. *Unable to launch a particular app.* Many Linux apps don't work right now in Simula (technically: any app that doesn't implement the XDG Wayland protocol). We're working on fixing this ASAP so that all Linux apps are compatible with Simula. This should be done by end of month (June 2019).
-
 * COMMENT Contributing
-
 We're looking for open-source contributors. If you're interested in using Haskell to bring VR and Linux together, drop by our [[https://gitter.im/SimulaVR/Simula][chat room]], or email georgewsinger@gmail.com.
-
 * COMMENT Donations
-
 If you're interested in a future where Linux and VR co-exist, you can donate to the following addresses:
-
 #+BEGIN_QUOTE
 *Bitcoin.* 17YLp6kJswxa8gGKwXqLrNtnM9Fgye6dfQ
-
 *Ethereum.* 0x373227b43Fe1eFe8da9d30ED1Ee45E7488F6cab3
-
 *PayPal.* george.w.singer@gmail.com
 #+END_QUOTE
-
 ** COMMENT Project Expenses
-
 *Project Expenses.* Donations to the project pay for the following expenses:
   - Part-time developers (x 1)
   - Vive donations to contributors (x 3)
   -
-
 * COMMENT Plans & Monthly Updates
-
 See Simula's [[https://github.com/SimulaVR/Simula/wiki][Wiki]] for our Master Plan and list of Monthly Updates.

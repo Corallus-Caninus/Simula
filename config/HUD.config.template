@@ -8,7 +8,7 @@ general {
 
 order += "disk /"
 order += "wireless wlan0"
-order += "ethernet enp4s0" # eth0
+order += "ethernet IF_REPLACE_ME" # eth0
 order += "battery 0"
 order += "memory"
 order += "tztime local"
@@ -23,7 +23,7 @@ ethernet eth0 {
         format_down = "🔗 down"
 }
 
-ethernet enp4s0 {
+ethernet IF_REPLACE_ME {
         format_up = "🔗 %ip (%speed)"
         format_down = "🔗 down"
 }
