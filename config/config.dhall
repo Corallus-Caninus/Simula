@@ -1,5 +1,4 @@
 -- For requests/questions about Simula's configuration, check out our discord: https://discordapp.com/invite/a4PnP7n
-
 let Configuration =
     -- Simula can handle up to 5 default starting apps (parsed as shell commands).
     -- You can also use the following special commands:
@@ -7,7 +6,7 @@ let Configuration =
     --   "launchHMDWebcam" to launch the HMD webcam view
     --   "launchUsageInstructions" to launch Simula's usage instructions
     -- To omit launching an app in a spot, use `None Text` instead of `Some "cmd"`.
-  {   _backend = "OpenXR" -- Supported options: "OpenVR", "OpenXR"
+  {   _backend = "OpenVR" -- Supported options: "OpenVR", "OpenVR"
   ,   _startingApps = { _center = Some "launchTerminal"
                       , _right  = None Text
                       , _bottom = None Text
@@ -16,7 +15,6 @@ let Configuration =
                       }
   , _defaultWindowResolution = Some { _1 = 900, _2 = 900 } -- New windows default this (typically square) resolution
                                                            -- Set to `None { _1 : Natural, _2 : Natural }` for windows to launch with their default (typically non-square) resolutions
-
   , _defaultWindowScale      = 1.0 : Double                -- In addition to resolution, apps can be scaled up or down by this factor upon launch
   , _axisScrollSpeed         = 0.02 : Double
   , _mouseSensitivityScaler  = 1.00 : Double
@@ -74,14 +72,11 @@ let Configuration =
                               , { _keyCombination = ["KEY_MASK_META", "KEY_MASK_SHIFT", "KEY_7"]       , _keyAction = "sendToWorkspace7" }
                               , { _keyCombination = ["KEY_MASK_META", "KEY_MASK_SHIFT", "KEY_8"]       , _keyAction = "sendToWorkspace8" }
                               , { _keyCombination = ["KEY_MASK_META", "KEY_MASK_SHIFT", "KEY_0"]       , _keyAction = "sendToWorkspacePersistent" }
-
-
                                 -- Anything else is parsed as a shell command:
                               , { _keyCombination = ["KEY_MASK_META", "KEY_K"] , _keyAction = "firefox -new-window"                                }
                               , { _keyCombination = ["KEY_MASK_META", "KEY_G"] , _keyAction = "google-chrome-stable --new-window google.com"       }
                               , { _keyCombination = ["KEY_MASK_META", "KEY_J"] , _keyAction = "gvim"                                               }
                               ]
-
     , _keyRemappings         = [ -- Simula allows you to remap keys (`KEY_*`). For example, remapping `KEY_HYPER_L` to `KEY_ESCAPE`:
                                  -- { _keyOriginal =  "KEY_HYPER_L" , _keyMappedTo = "KEY_ESCAPE" }
                                  --
@@ -92,5 +87,4 @@ let Configuration =
   , _environmentDefault    = "AllSkyFree_Sky_EpicBlueSunset_Equirect.png"
   , _scenes = [] : List Text
   }
-
 in Configuration
