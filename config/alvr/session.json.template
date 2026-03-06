@@ -2,10 +2,10 @@
   "server_version": "20.6.1",
   "drivers_backup": null,
   "openvr_config": {
-    "eye_resolution_width": 3096,
-    "eye_resolution_height": 3312,
-    "target_eye_resolution_width": 2064,
-    "target_eye_resolution_height": 2208,
+    "eye_resolution_width": 2048,
+    "eye_resolution_height": 2144,
+    "target_eye_resolution_width": 2592,
+    "target_eye_resolution_height": 2720,
     "tracking_ref_only": false,
     "enable_vive_tracker_proxy": false,
     "aggressive_keyframe_resend": false,
@@ -21,24 +21,24 @@
     "amd_encoder_quality_preset": 0,
     "rate_control_mode": 0,
     "filler_data": false,
-    "entropy_coding": 0,
+    "entropy_coding": 1,
     "force_sw_encoding": false,
     "sw_thread_count": 0,
     "controller_is_tracker": false,
     "controllers_enabled": false,
-    "enable_foveated_encoding": true,
-    "foveation_center_size_x": 0.55,
-    "foveation_center_size_y": 0.55,
-    "foveation_center_shift_x": 0.4,
-    "foveation_center_shift_y": 0.1,
-    "foveation_edge_ratio_x": 4.0,
-    "foveation_edge_ratio_y": 5.0,
+    "enable_foveated_encoding": false,
+    "foveation_center_size_x": 0.0,
+    "foveation_center_size_y": 0.0,
+    "foveation_center_shift_x": 0.0,
+    "foveation_center_shift_y": 0.0,
+    "foveation_edge_ratio_x": 0.0,
+    "foveation_edge_ratio_y": 0.0,
     "enable_color_correction": false,
     "brightness": 0.0,
     "contrast": 0.0,
-    "saturation": 0.5,
-    "gamma": 1.0,
-    "sharpening": 0.75,
+    "saturation": 0.0,
+    "gamma": 0.0,
+    "sharpening": 0.0,
     "linux_async_compute": false,
     "linux_async_reprojection": false,
     "nvenc_quality_preset": 7,
@@ -64,13 +64,21 @@
     "_controller_profile": 0
   },
   "client_connections": {
+    "6905.client": {
+      "display_name": "Quest 3",
+      "current_ip": "192.168.6.129",
+      "manual_ips": [],
+      "trusted": true,
+      "connection_state": "Streaming",
+      "cabled": false
+    }
   },
   "session_settings": {
     "video": {
       "gui_collapsed": false,
       "adapter_index": 0,
       "transcoding_view_resolution": {
-        "Scale": 1.5,
+        "Scale": 1.22,
         "Absolute": {
           "width": 2064,
           "height": {
@@ -81,7 +89,7 @@
         "variant": "Scale"
       },
       "emulated_headset_view_resolution": {
-        "Scale": 1.5,
+        "Scale": 1.55,
         "Absolute": {
           "width": 3096,
           "height": {
@@ -92,9 +100,9 @@
         "variant": "Scale"
       },
       "preferred_fps": 72.0,
-      "max_buffering_frames": 2.0,
+      "max_buffering_frames": 1.0,
       "buffering_history_weight": 0.9,
-      "optimize_game_render_latency": true,
+      "optimize_game_render_latency": false,
       "bitrate": {
         "gui_collapsed": false,
         "mode": {
@@ -154,7 +162,7 @@
           "variant": "High"
         },
         "entropy_coding": {
-          "variant": "Cabac"
+          "variant": "Cavlc"
         },
         "use_10bit": false,
         "nvenc": {
@@ -187,7 +195,7 @@
           "enable_weighted_prediction": false
         },
         "amf": {
-          "gui_collapsed": true,
+          "gui_collapsed": false,
           "quality_preset": {
             "variant": "Quality"
           },
@@ -246,11 +254,11 @@
         ]
       },
       "foveated_encoding": {
-        "enabled": true,
+        "enabled": false,
         "content": {
           "gui_collapsed": false,
-          "center_size_x": 0.55,
-          "center_size_y": 0.55,
+          "center_size_x": 0.8,
+          "center_size_y": 0.8,
           "center_shift_x": 0.4,
           "center_shift_y": 0.1,
           "edge_ratio_x": 4.0,
@@ -285,7 +293,7 @@
           "contrast": 0.0,
           "saturation": 0.5,
           "gamma": 1.0,
-          "sharpening": 0.75
+          "sharpening": 0.5
         }
       }
     },
