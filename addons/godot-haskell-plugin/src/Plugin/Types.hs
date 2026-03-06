@@ -427,7 +427,7 @@ connectGodotSignal :: (GodotObject :< source) -- , GodotObject :< method_object)
                    -> [GodotVariant]       -- default arguments to supply to method (jammed /after/ manual arguments supplied)
                    -> IO (Int)                --
 connectGodotSignal sourceObj signalName methodObj methodName defaultArgs = do
-  -- putStrLn "connectGodotSignal"
+  -- logPutStrLn "connectGodotSignal"
   let sourceObj' = safeCast sourceObj      :: GodotObject
   signalName'    <- (toLowLevel (pack signalName))  :: IO GodotString
   let methodObj' =  safeCast methodObj     :: GodotObject
@@ -495,7 +495,7 @@ emitSignal :: (GodotObject :< a)
            -> [b]    -- Arguments emitted (must be registered types that inherit from GodotObject like i.e. GodotSimulaViewSprite)
            -> IO ()
 emitSignal signalEmitter signalName signalArgs = do
-  -- putStrLn "emitSignal"
+  -- logPutStrLn "emitSignal"
   let signalEmitter' = (safeCast signalEmitter) :: GodotObject
   signalName'        <- toLowLevel (pack signalName) :: IO GodotString
   signalArgs'        <- mapM regToVariant signalArgs
@@ -764,9 +764,16 @@ logGSVS str gsvs = do
 
 logStr :: String -> IO ()
 logStr string = do
+  time <- getCurrentTime
   maybeLogDir <- lookupEnv "SIMULA_LOG_DIR"
   let logDir = fromMaybe "." maybeLogDir
-  appendFile (logDir ++ "/log.txt") $ string ++ "\n"
+  createDirectoryIfMissing True logDir
+  let logPath = logDir ++ "/log.txt"
+  -- Catching exceptions to prevent "resource busy" crashes
+  res <- Control.Exception.Safe.try (appendFile logPath $ "[" ++ (show time) ++ "] " ++ string ++ "\n") :: IO (Either IOException ())
+  case res of
+    Left e -> putStrLn $ "Warning: Could not write to log file: " ++ show e
+    Right _ -> return ()
 
 logPutStrLn :: String -> IO ()
 logPutStrLn string = do
@@ -784,7 +791,7 @@ getPid ph = withProcessHandle ph go
 -- Generic imports from SimulaCanvasItem.hs
 getCoordinatesFromCenter :: GodotWlrSurface -> Int -> Int -> IO GodotVector2
 getCoordinatesFromCenter wlrSurface sx sy = do
-  -- putStrLn "getCoordinatesFromCenter"
+  -- logPutStrLn "getCoordinatesFromCenter"
   (bufferWidth', bufferHeight')    <- getBufferDimensions wlrSurface
   let (bufferWidth, bufferHeight)  = (fromIntegral bufferWidth', fromIntegral bufferHeight')
   let (fromTopLeftX, fromTopLeftY) = (fromIntegral sx, fromIntegral sy)
@@ -911,7 +918,7 @@ appLaunch gss appStr maybeLocation = do
     ("launchHMDWebcam", _) -> launchHMDWebCam gss maybeLocation
     ("launchTerminal", _) -> terminalLaunch gss maybeLocation
     ("launchUsageInstructions", _) -> appLaunch gss "midori https://github.com/SimulaVR/Simula#usage -p" maybeLocation
-    (_, Nothing) -> putStrLn "No DISPLAY found!" >> (return $ fromInteger 0)
+    (_, Nothing) -> logPutStrLn "No DISPLAY found!" >> (return $ fromInteger 0)
     (_, (Just xwaylandDisplay)) -> do
       let envMap = M.fromList originalEnv
       maybeXdgRuntime <- lookupEnv "XDG_RUNTIME_DIR"
@@ -935,32 +942,42 @@ appLaunch gss appStr maybeLocation = do
       let envMapClean = M.delete "LD_LIBRARY_PATH" $ M.insert "TERM" "xterm-256color" $ M.insert "LANG" "en_US.UTF-8" envMap'''
       
       let envMapWithDisplay = M.insert "DISPLAY" xwaylandDisplay envMapClean
-      let isTerminal = "xfce4-terminal" `Data.List.isInfixOf` appStr || "kitty" `Data.List.isInfixOf` appStr
-      let envMapWithWaylandDisplay = case (maybeLocation, isTerminal) of
-            (Just location, False) -> M.insert "SIMULA_STARTING_LOCATION" location (M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithDisplay)
-            (Just location, True)  -> M.insert "SIMULA_STARTING_LOCATION" location (M.insert "WAYLAND_DISPLAY" "" envMapWithDisplay)
-            (Nothing, False)       -> (M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithDisplay)
-            (Nothing, True)        -> M.insert "WAYLAND_DISPLAY" "" envMapWithDisplay
+      let isKitty = "kitty" `Data.List.isInfixOf` appStr
+      let isTerminal = "xfce4-terminal" `Data.List.isInfixOf` appStr || isKitty
       
-      let envListWithDisplays = M.toList envMapWithWaylandDisplay
-      putStrLn $ "appLaunch: running " ++ appStr
-      putStrLn $ "appLaunch: DISPLAY=" ++ (fromMaybe "NONE" $ M.lookup "DISPLAY" envMapWithWaylandDisplay)
-      putStrLn $ "appLaunch: WAYLAND_DISPLAY=" ++ (fromMaybe "NONE" $ M.lookup "WAYLAND_DISPLAY" envMapWithWaylandDisplay)
-      putStrLn $ "appLaunch: LD_LIBRARY_PATH=" ++ (fromMaybe "CLEARED" $ M.lookup "LD_LIBRARY_PATH" envMapWithWaylandDisplay)
-      putStrLn $ "appLaunch: HOME=" ++ (fromMaybe "NONE" $ M.lookup "HOME" envMapWithWaylandDisplay)
+      logPutStrLn $ "appLaunch: isTerminal=" ++ (show isTerminal)
+      let envMapWithWaylandDisplay = if isTerminal
+                                     then M.delete "WAYLAND_DISPLAY" envMapWithDisplay
+                                     else M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithDisplay
+      
+      -- Force Kitty to use X11 if it's struggling with Wayland EGL in Simula
+      let envMapWithKittyFix = if isKitty
+                               then M.insert "KITTY_ENABLE_WAYLAND" "0" envMapWithWaylandDisplay
+                               else envMapWithWaylandDisplay
+
+      let envMapWithLocation = case maybeLocation of
+                                    Just location -> M.insert "SIMULA_STARTING_LOCATION" location envMapWithKittyFix
+                                    Nothing -> envMapWithKittyFix
+      
+      let envListWithDisplays = M.toList envMapWithLocation
+      logPutStrLn $ "appLaunch: running " ++ appStr
+      logPutStrLn $ "appLaunch: DISPLAY=" ++ (fromMaybe "NONE" $ M.lookup "DISPLAY" envMapWithLocation)
+      logPutStrLn $ "appLaunch: WAYLAND_DISPLAY=" ++ (fromMaybe "NONE" $ M.lookup "WAYLAND_DISPLAY" envMapWithLocation)
+      logPutStrLn $ "appLaunch: KITTY_ENABLE_WAYLAND=" ++ (fromMaybe "NONE" $ M.lookup "KITTY_ENABLE_WAYLAND" envMapWithLocation)
+      logPutStrLn $ "appLaunch: HOME=" ++ (fromMaybe "NONE" $ M.lookup "HOME" envMapWithLocation)
       
       res <- Control.Exception.Safe.try $ createProcess (shell appStr) { env = Just envListWithDisplays, new_session = True } :: IO (Either IOException (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle))
       pid <- case res of
                   Left e -> do
-                    putStrLn $ "appLaunch: failed to start " ++ appStr ++ ": " ++ show e
+                    logPutStrLn $ "appLaunch: failed to start " ++ appStr ++ ": " ++ show e
                     return $ fromInteger 0
                   Right (_, _, _, processHandle) -> do maybePid <- System.Process.getPid processHandle
                                                        case maybePid of
                                                             Just pid -> do
-                                                              putStrLn $ "appLaunch: started " ++ appStr ++ " with pid " ++ show pid
+                                                              logPutStrLn $ "appLaunch: started " ++ appStr ++ " with pid " ++ show pid
                                                               forkIO $ do
                                                                 exitCode <- waitForProcess processHandle
-                                                                putStrLn $ "appLaunch: process " ++ appStr ++ " (pid " ++ show pid ++ ") exited with " ++ show exitCode
+                                                                logPutStrLn $ "appLaunch: process " ++ appStr ++ " (pid " ++ show pid ++ ") exited with " ++ show exitCode
                                                               return pid
                                                             Nothing -> return $ fromInteger $ 0
       startingAppPids <- readTVarIO (gss ^. gssStartingAppPids)
@@ -977,7 +994,7 @@ launchHMDWebCam gss maybeLocation = do
   maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
   let appDir = fromMaybe "./result/bin" maybeAppDir
   case maybePath of
-    Nothing -> do putStrLn "Cannot find HMD web cam!"
+    Nothing -> do logPutStrLn "Cannot find HMD web cam!"
                   appLaunch gss "nullApp" Nothing
     Just path  -> appLaunch gss (appDir ++ "/ffplay -loglevel quiet -f v4l2" ++ path) maybeLocation
     where getHMDWebCamPath :: IO (Maybe FilePath)
@@ -996,10 +1013,10 @@ terminalLaunch :: GodotSimulaServer -> Maybe String -> IO ProcessID
 terminalLaunch gss maybeLocation = do
   maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
   let appDir = fromMaybe "./result/bin" maybeAppDir
-  terminalPath <- System.Directory.doesFileExist (appDir ++ "/xfce4-terminal") >>= \case
-    True -> return (appDir ++ "/xfce4-terminal")
-    False -> return "xfce4-terminal"
-  appLaunch gss (terminalPath ++ " --disable-server -e \"bash -i\"") maybeLocation
+  terminalPath <- System.Directory.doesFileExist (appDir ++ "/kitty") >>= \case
+    True -> return (appDir ++ "/kitty")
+    False -> return "kitty"
+  appLaunch gss (terminalPath ++ " bash -i") maybeLocation
 
 getTextureFromURL :: String -> IO (Maybe GodotTexture)
 getTextureFromURL urlStr = do
@@ -1065,7 +1082,7 @@ getEnvironmentTexture worldEnvironment filePath = do
 
   maybeMilkyTexture <- getTextureFromURL $ filePath -- Don't use "res:// ++ filePath" since we need absolute system filepaths now
   case maybeMilkyTexture of
-    Nothing -> do putStrLn $ "Can't load texture: " ++ filePath
+    Nothing -> do logPutStrLn $ "Can't load texture: " ++ filePath
                   return Nothing
     Just tex -> return $ Just tex
 
@@ -1090,12 +1107,12 @@ cycleGSSEnvironment gss = do
 
   let maybeNextTextureStr = next (Just currentTextureStr) texturesLst
   case maybeNextTextureStr of
-    Nothing -> putStrLn $ "Unable to cycle environment texture!"
+    Nothing -> logPutStrLn $ "Unable to cycle environment texture!"
     Just nextTextureStr -> do
       atomically $ writeTVar (gss ^. gssWorldEnvironment) (worldEnvironment, nextTextureStr)
       maybeNextTexture <- getEnvironmentTexture worldEnvironment nextTextureStr
       case maybeNextTexture of
-        Nothing -> putStrLn "Unable to cycle environment texture!"
+        Nothing -> logPutStrLn "Unable to cycle environment texture!"
         Just nextTexture -> do oldTex <- G.get_panorama panoramaSky :: IO GodotTexture
                                G.set_panorama panoramaSky nextTexture
                                -- G.unreference @GodotReference (safeCast oldTex) -- Doesn't work here
@@ -1114,7 +1131,7 @@ cycleGSSScene gss = do
       let maybeNextSceneStr = next (Just currentSceneStr) scenes
       return maybeNextSceneStr
   maybeNextSceneNode <- case maybeNextSceneStr of
-                             Nothing -> do putStrLn "Unable to change scenes!"
+                             Nothing -> do logPutStrLn "Unable to change scenes!"
                                            return Nothing
                              Just nextSceneStr -> do
                                   resourceLoader <- getSingleton Godot_ResourceLoader "ResourceLoader"
@@ -1133,7 +1150,7 @@ cycleGSSScene gss = do
       queueFreeNodeAndChildren currentSceneNode
       addChild gss nextSceneNode
       atomically $ writeTVar (gss ^. gssScene) $ Just (nextSceneStr, nextSceneNode)
-    _ -> putStrLn "Unable to change scenes!"
+    _ -> logPutStrLn "Unable to change scenes!"
   where head' :: [a] -> Maybe a
         head' [] = Nothing
         head' (x:xs) = Just x
@@ -1143,7 +1160,7 @@ orientSpriteTowardsGaze gsvs = do
   gss <- readTVarIO (gsvs ^. gsvsServer)
   isInSceneGraph <- G.is_a_parent_of ((safeCast gss) :: GodotNode ) ((safeCast gsvs) :: GodotNode)
   case isInSceneGraph of
-    False -> putStrLn "Nothing to orient!"
+    False -> logPutStrLn "Nothing to orient!"
     True -> do gss <- readTVarIO (gsvs ^. gsvsServer)
                upV3 <- toLowLevel (V3 0 1 0) :: IO GodotVector3
                rotationAxisY <- toLowLevel (V3 0 1 0) :: IO GodotVector3
@@ -1251,7 +1268,7 @@ saveViewportAsPngAndLaunch :: GodotSimulaViewSprite -> GodotViewportTexture -> M
 saveViewportAsPngAndLaunch gsvs tex m22@(V2 (V2 ox oy) (V2 ex ey)) = do
   let isNull = ((unsafeCoerce tex) == nullPtr)
   case isNull of
-    True -> putStrLn "Texture is null in saveViewportAsPngAndLaunch!"
+    True -> logPutStrLn "Texture is null in saveViewportAsPngAndLaunch!"
     False -> do
       -- Get image
       texAsImage <- G.get_data tex
@@ -1436,7 +1453,7 @@ getSpilloverDims gsvs = do
 
 setShader :: GodotSimulaViewSprite -> String -> IO ()
 setShader gsvs tres = do
-  putStrLn $ "setShader: " ++ tres
+  logPutStrLn $ "setShader: " ++ tres
   quadMesh <- getQuadMesh gsvs
   shader <- load GodotShader "Shader" (Data.Text.pack tres)
   case shader of
@@ -1611,7 +1628,7 @@ validateSurfaceE surf = do
 
 catchGodot :: (a -> [GodotVariant] -> IO ()) -> ((a -> [GodotVariant] -> IO ()))
 catchGodot func x y = catch (func x y) (\(e :: NullPointerException) -> do
-                                          -- putStrLn $ "Caught " ++ show e  -- quiet for now :)
+                                          -- logPutStrLn $ "Caught " ++ show e  -- quiet for now :)
                                           return ())
 
 data RotationMethod = Workspace | Workspaces
@@ -1778,11 +1795,11 @@ forkUpdateHUDRecursively gss = do
     let defaultHudConfig = simulaNixDir </> "config" </> "HUD.config"
     createDirectoryIfMissing True configDir
     System.Directory.copyFile defaultHudConfig hudConfigPath
-    putStrLn $ "Using config file: " ++ hudConfigPath
+    logPutStrLn $ "Using config file: " ++ hudConfigPath
 
   i3statusPathExists <- System.Directory.doesFileExist (appDir </> "i3status")
   let i3statusPath = if i3statusPathExists then (appDir </> "i3status") else "i3status"
-  putStrLn $ "Attempting to run i3status from: " ++ i3statusPath
+  logPutStrLn $ "Attempting to run i3status from: " ++ i3statusPath
 
   res <- try $ System.IO.Streams.runInteractiveProcess 
     i3statusPath
@@ -1791,7 +1808,7 @@ forkUpdateHUDRecursively gss = do
     Nothing
 
   case res of
-    Left e -> putStrLn $ "Error starting i3status: " ++ show (e :: IOException)
+    Left e -> logPutStrLn $ "Error starting i3status: " ++ show (e :: IOException)
     Right (_,out,err,pid) -> do
       out' <- System.IO.Streams.Text.decodeUtf8 out
       err' <- System.IO.Streams.Text.decodeUtf8 err
@@ -1799,7 +1816,7 @@ forkUpdateHUDRecursively gss = do
         forever $ do
           maybeLine <- System.IO.Streams.Internal.read err'
           case maybeLine of
-            Just line -> putStrLn $ "i3status stderr: " ++ (unpack line)
+            Just line -> logPutStrLn $ "i3status stderr: " ++ (unpack line)
             Nothing -> return ()
       _ <- forkIO $ updateHUDRecursively gss out'
       return ()

@@ -2,9 +2,9 @@
   "server_version": "20.6.1",
   "drivers_backup": null,
   "openvr_config": {
-    "eye_resolution_width": 2048,
-    "eye_resolution_height": 2208,
-    "target_eye_resolution_width": 2048,
+    "eye_resolution_width": 3096,
+    "eye_resolution_height": 3312,
+    "target_eye_resolution_width": 2064,
     "target_eye_resolution_height": 2208,
     "tracking_ref_only": false,
     "enable_vive_tracker_proxy": false,
@@ -33,12 +33,12 @@
     "foveation_center_shift_y": 0.1,
     "foveation_edge_ratio_x": 4.0,
     "foveation_edge_ratio_y": 5.0,
-    "enable_color_correction": false,
+    "enable_color_correction": true,
     "brightness": 0.0,
     "contrast": 0.0,
-    "saturation": 0.0,
-    "gamma": 0.0,
-    "sharpening": 0.0,
+    "saturation": 0.5,
+    "gamma": 1.0,
+    "sharpening": 0.5,
     "linux_async_compute": false,
     "linux_async_reprojection": false,
     "nvenc_quality_preset": 7,
@@ -63,13 +63,14 @@
     "amd_bitrate_corruption_fix": false,
     "_controller_profile": 0
   },
-  "client_connections": {},
+  "client_connections": {
+  },
   "session_settings": {
     "video": {
       "gui_collapsed": false,
       "adapter_index": 0,
       "transcoding_view_resolution": {
-        "Scale": 1.02,
+        "Scale": 1.0,
         "Absolute": {
           "width": 2064,
           "height": {
@@ -80,15 +81,15 @@
         "variant": "Absolute"
       },
       "emulated_headset_view_resolution": {
-        "Scale": 1.1,
+        "Scale": 1.5,
         "Absolute": {
-          "width": 2064,
+          "width": 3096,
           "height": {
             "set": true,
-            "content": 2208
+            "content": 3312
           }
         },
-        "variant": "Absolute"
+        "variant": "Scale"
       },
       "preferred_fps": 72.0,
       "max_buffering_frames": 2.0,
@@ -277,7 +278,7 @@
         }
       },
       "color_correction": {
-        "enabled": false,
+        "enabled": true,
         "content": {
           "gui_collapsed": false,
           "brightness": 0.0,

@@ -145,7 +145,7 @@ loadOpenVRControllerMesh name = do
 -- Because the ARVRController member method is_button_pressed returns Int, not Bool
 isButtonPressed :: Int -> GodotSimulaController -> IO Bool
 isButtonPressed btnId gsc = do
-  -- putStrLn "isButtonPressed"
+  -- logPutStrLn "isButtonPressed"
   ctId <- G.get_joystick_id $ (safeCast gsc :: GodotARVRController)
   getSingleton GodotInput "Input" >>= \inp -> G.is_joy_button_pressed inp ctId btnId
 
@@ -153,7 +153,7 @@ isButtonPressed btnId gsc = do
 -- | Get the window pointed at if any.
 pointerWindow :: GodotSimulaController -> IO (Maybe GodotSimulaViewSprite)
 pointerWindow gsc = do
-  -- putStrLn "pointerWindow"
+  -- logPutStrLn "pointerWindow"
   G.force_raycast_update (_gscRayCast gsc)
   isColliding <- G.is_colliding $ _gscRayCast gsc
   if isColliding
@@ -212,20 +212,20 @@ rescaleOrScroll ct delta = do
   rescaleBy (V2 _ y) a = do
     -- maybeWindow <- pointerWindow ct
     -- case maybeWindow of
-    --   Nothing -> putStrLn "Couldn't get a window!"
-    --   _ -> putStrLn $ "Rescaling window!"
+    --   Nothing -> logPutStrLn "Couldn't get a window!"
+    --   _ -> logPutStrLn $ "Rescaling window!"
     V3 1 1 1 ^* (1 + y * 0.5)
       & toLowLevel
       >>= G.scale_object_local (safeCast a :: GodotSpatial)
 
 addSimulaController :: GodotARVROrigin -> Text -> Int -> IO GodotSimulaController
 addSimulaController originNode nodeName ctID = do
-  -- putStrLn "addSimulaController"
+  -- logPutStrLn "addSimulaController"
   -- Requires too "large" of a type constructor:
   -- ct <- "res://addons/godot-haskell-plugin/SimulaController.gdns"
   --       & newNS'' GodotSimulaController "SimulaController" []
 
-  -- Casts type properly; passes putStrLn inspection test:
+  -- Casts type properly; passes logPutStrLn inspection test:
   ct <- "res://addons/godot-haskell-plugin/SimulaController.gdns"
         & newNS'' id "Object" []
         >>= Api.godot_nativescript_get_userdata
@@ -275,7 +275,7 @@ process self [deltaGV] = do
 
 getWlrSeatFromPath :: GodotSimulaController -> IO GodotWlrSeat
 getWlrSeatFromPath self = do
-  -- putStrLn "getWlrSeatFromPath"
+  -- logPutStrLn "getWlrSeatFromPath"
   let nodePathStr = "/root/Root/SimulaServer" -- I'm not 100% sure this is correct!
   nodePath <- (toLowLevel (pack nodePathStr))
   gssNode  <- G.get_node ((safeCast self) :: GodotNode) nodePath

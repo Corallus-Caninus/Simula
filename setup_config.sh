@@ -28,7 +28,7 @@ with open('$SESSION_JSON', 'w') as f:
 "
         echo "  - Client connections cleared."
     else
-        sed -i '/"client_connections": {/,/  },/c\  "client_connections": {},' "$SESSION_JSON"
+        sed -i '/"client_connections": {/,/^  },/c\  "client_connections": {},' "$SESSION_JSON"
         echo "  - Client connections cleared (using fallback)."
     fi
 else

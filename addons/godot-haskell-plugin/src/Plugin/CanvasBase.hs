@@ -177,7 +177,7 @@ _draw cb _ = do
                grayColor <- (toLowLevel $ (rgb 0.0 0.0 0.0) `withOpacity` 0.5) :: IO GodotColor
                G.draw_rect cb m22Rect' grayColor False 2.0 False
              (Just (SurfaceLocalCoordinates (ox, oy)), Just (SurfaceLocalCoordinates (ex, ey))) -> do
-               putStrLn $ "Screenshot mode: taking screenshot from (" ++ (show ox) ++ ", " ++ (show oy) ++ ") to (" ++ (show ex) ++ ", " ++ (show ey) ++ ")"
+               logPutStrLn $ "Screenshot mode: taking screenshot from (" ++ (show ox) ++ ", " ++ (show oy) ++ ") to (" ++ (show ex) ++ ", " ++ (show ey) ++ ")"
 
                -- Take screenshot & save to X clipboard
                let m22Rect = V2 (V2 ox oy) (V2 (ex - ox) (ey - oy))

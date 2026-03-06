@@ -183,12 +183,12 @@ getKeyboardAction gss keyboardShortcut =
 
         leftClick :: SpriteLocation -> Bool -> IO ()
         leftClick (Just (gsvs, coords@(SurfaceLocalCoordinates (sx, sy)))) True = do
-          putStrLn $ "leftClick True"
+          logPutStrLn $ "leftClick True"
           -- updateCursorStateAbsolute gsvs sx sy
           -- sendWlrootsMotion gsvs
           processClickEvent' gsvs (Button True 1) coords -- BUTTON_LEFT = 1
         leftClick (Just (gsvs, coords@(SurfaceLocalCoordinates (sx, sy)))) False = do
-          putStrLn $ "leftClick False"
+          logPutStrLn $ "leftClick False"
           processClickEvent' gsvs (Button False 1) coords -- BUTTON_LEFT = 1
         leftClick _ _ = return ()
 
@@ -261,7 +261,7 @@ getKeyboardAction gss keyboardShortcut =
           case maybePh of
             Nothing -> do
               getSingleton Godot_OS "OS" >>= \os -> G.set_window_fullscreen os True
-              putStrLn "Starting screen recording.."
+              logPutStrLn "Starting screen recording.."
               forkIO $ do 
                 timeStampStr <- show <$> getCurrentTime
                 let videoBaseName' = "simula_screen_recording_" <> timeStampStr
@@ -276,7 +276,7 @@ getKeyboardAction gss keyboardShortcut =
                 atomically $ writeTVar (gss ^. gssScreenRecorder) (Just ph)
               return ()
             Just ph -> do
-              putStrLn "Stopping screen recording.."
+              logPutStrLn "Stopping screen recording.."
               getSingleton Godot_OS "OS" >>= \os -> do
                 G.set_window_maximized os True -- Fails?
                 G.set_window_fullscreen os False
@@ -313,7 +313,7 @@ getKeyboardAction gss keyboardShortcut =
           maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
           let appDir = fromMaybe "./result/bin" maybeAppDir
           case maybeXwaylandDisplay of
-            Nothing -> putStrLn "No DISPLAY found!"
+            Nothing -> logPutStrLn "No DISPLAY found!"
             (Just xwaylandDisplay) -> do
               let envMap = M.fromList originalEnv
               let envMapWithDisplay = M.insert "DISPLAY" xwaylandDisplay envMap
@@ -448,7 +448,7 @@ getKeyboardAction gss keyboardShortcut =
 
         reloadConfig :: SpriteLocation -> Bool -> IO ()
         reloadConfig _ True = do
-          putStrLn "Reloading Simula config.."
+          logPutStrLn "Reloading Simula config.."
           configuration <- parseConfiguration
           atomically $ writeTVar (gss ^. gssConfiguration) configuration
           let keyboardShortcutsVal = getKeyboardShortcuts gss (configuration ^. keyBindings)
@@ -464,7 +464,7 @@ getKeyboardAction gss keyboardShortcut =
 
         terminateSimula :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         terminateSimula gss _ True = do
-          putStrLn "Terminating Simula.."
+          logPutStrLn "Terminating Simula.."
           sceneTree <- G.get_tree gss
           G.quit sceneTree (-1)
           return ()
@@ -472,7 +472,7 @@ getKeyboardAction gss keyboardShortcut =
 
         cycleEnvironment :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         cycleEnvironment gss _ True = do
-          putStrLn "Cycling environment.."
+          logPutStrLn "Cycling environment.."
           cycleGSSEnvironment gss
           return ()
         cycleEnvironment _ _ _ = do
@@ -480,7 +480,7 @@ getKeyboardAction gss keyboardShortcut =
 
         cycleScene :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         cycleScene gss _ True = do
-          putStrLn "Cycling scene.."
+          logPutStrLn "Cycling scene.."
           camera <- getARVRCameraOrPancakeCamera gss
           G.set_zfar camera 5000 -- Set large in case some scenes have faraway objects to render
           cycleGSSScene gss
@@ -490,7 +490,7 @@ getKeyboardAction gss keyboardShortcut =
 
         toggleARMode :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         toggleARMode gss _ True = do
-          putStrLn "Toggling AR mode.."
+          logPutStrLn "Toggling AR mode.."
 
           -- CanvasLayer
           canvasLayer <- unsafeInstance GodotCanvasLayer "CanvasLayer"
@@ -535,12 +535,12 @@ getKeyboardAction gss keyboardShortcut =
 
         debugPrint :: SpriteLocation -> Bool -> IO ()
         debugPrint _ True = do
-          putStrLn "debugPrint"
+          logPutStrLn "debugPrint"
         debugPrint _ _ = return ()
 
         toggleWasdMode :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         toggleWasdMode gss _ True = do
-          putStrLn "toggleWasdMode"
+          logPutStrLn "toggleWasdMode"
           wasdMode <- readTVarIO (gss ^. gssWasdMode)
           case wasdMode of
             True -> atomically $ writeTVar (gss ^. gssWasdMode) False
@@ -549,7 +549,7 @@ getKeyboardAction gss keyboardShortcut =
 
         switchToWorkspace :: GodotSimulaServer -> Int -> SpriteLocation -> Bool -> IO ()
         switchToWorkspace gss workspaceNum _ True = do
-          putStrLn $ "Switching to workspace" ++ (show workspaceNum)
+          logPutStrLn $ "Switching to workspace" ++ (show workspaceNum)
           (currentWorkspace, currentWorkspaceStr) <- readTVarIO (gss ^. gssWorkspace)
           let newWorkspace = (gss ^. gssWorkspaces) V.! workspaceNum
 
@@ -563,7 +563,7 @@ getKeyboardAction gss keyboardShortcut =
 
         sendToWorkspace :: GodotSimulaServer -> Int -> SpriteLocation -> Bool -> IO ()
         sendToWorkspace gss workspaceNum (Just (gsvs, coords@(SurfaceLocalCoordinates (sx, sy)))) True = do
-          putStrLn $ "Sending app to workspace " ++ (show workspaceNum)
+          logPutStrLn $ "Sending app to workspace " ++ (show workspaceNum)
           (currentWorkspace, currentWorkspaceStr) <- readTVarIO (gss ^. gssWorkspace)
           workspacePersistent <- readTVarIO (gss ^. gssWorkspacePersistent)
 
@@ -580,7 +580,7 @@ getKeyboardAction gss keyboardShortcut =
 
         addLeapMotion :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         addLeapMotion gss _ True = do
-          putStrLn "Adding LEAP Motion to scene graph.."
+          logPutStrLn "Adding LEAP Motion to scene graph.."
           -- addLeapMotionScene -- Deprecated
           addLeapMotionModule gss
           return ()
@@ -588,14 +588,14 @@ getKeyboardAction gss keyboardShortcut =
 
         damp :: GodotSimulaServer -> Damp -> SpriteLocation -> Bool -> IO ()
         damp gss damp _ True = do
-          putStrLn "damp.."
+          logPutStrLn "damp.."
           case damp of
             (Rotation amount) -> do
-              putStrLn $ "Rotation " ++ (show amount)
+              logPutStrLn $ "Rotation " ++ (show amount)
             (Translation amount) -> do
-              putStrLn $ "Translation " ++ (show amount)
+              logPutStrLn $ "Translation " ++ (show amount)
             (Pinch amount) -> do
-              putStrLn $ "Pinch " ++ (show amount)
+              logPutStrLn $ "Pinch " ++ (show amount)
           return ()
         damp _ _ _ _ = return ()
 
@@ -686,7 +686,7 @@ instance NativeScript GodotSimulaServer where
 
 process :: GodotSimulaServer -> [GodotVariant] -> IO ()
 process gss [deltaGV] = do
-  -- putStrLn "SimulaServer.process start"
+  -- logPutStrLn "SimulaServer.process start"
   wasdMode <- readTVarIO (gss ^. gssWasdMode)
   delta <- fromGodotVariant deltaGV :: IO Float
   when wasdMode $ processWASDMovement gss delta
@@ -703,7 +703,7 @@ process gss [deltaGV] = do
 
   -- Update Workspace HUD if changed
   when (workspaceStatus /= (hud ^. hudLastWorkspaceStatus)) $ do
-    -- putStrLn $ "Updating Workspace HUD: " ++ workspaceStatus
+    -- logPutStrLn $ "Updating Workspace HUD: " ++ workspaceStatus
     let rtLabelW = (hud ^. hudRtlWorkspace)
     let svr = (hud ^. hudSvrTexture)
     let dynamicFont = (hud ^. hudDynamicFont)
@@ -729,7 +729,7 @@ process gss [deltaGV] = do
 
   -- Update i3status HUD if changed
   when (i3status /= (hud ^. hudLastI3Status)) $ do
-    -- putStrLn $ "Updating i3status HUD: " ++ i3status
+    -- logPutStrLn $ "Updating i3status HUD: " ++ i3status
     let rtLabel = (hud ^. hudRtlI3)
     let dynamicFont = (hud ^. hudDynamicFont)
     G.clear rtLabel
@@ -739,11 +739,11 @@ process gss [deltaGV] = do
     G.pop rtLabel
     G.pop rtLabel
     atomically $ modifyTVar (gss ^. gssHUD) (\h -> h { _hudLastI3Status = i3status })
-  -- putStrLn "SimulaServer.process end"
+  -- logPutStrLn "SimulaServer.process end"
 
 ready :: GodotSimulaServer -> [GodotVariant] -> IO ()
 ready gss _ = do
-  putStrLn "!!!!!! SimulaServer.ready STARTING !!!!!!"
+  logPutStrLn "!!!!!! SimulaServer.ready STARTING !!!!!!"
   debugModeMaybe <- lookupEnv "DEBUG"
   rrModeMaybe <- lookupEnv "RUNNING_UNDER_RR"
   maybeLogDir <- lookupEnv "SIMULA_LOG_DIR"
@@ -751,7 +751,7 @@ ready gss _ = do
   -- Delete log file
   case rrModeMaybe of
     Just "1" -> return ()
-    _ -> do putStrLn "Running Simula without RR"
+    _ -> do logPutStrLn "Running Simula without RR"
             readProcess "touch" [logDir ++ "/log.txt"] []
             readProcess "rm" [logDir ++ "/log.txt"] []
             return ()
@@ -784,7 +784,7 @@ ready gss _ = do
 
   newDisplay <- getEnv "DISPLAY"
   putStr "New DISPLAY="
-  putStrLn newDisplay
+  logPutStrLn newDisplay
   setEnv "DISPLAY" oldDisplay
   if (newDisplay /= oldDisplay)
     then atomically $ writeTVar (gss ^. gssXWaylandDisplay) (Just newDisplay)
@@ -838,18 +838,18 @@ ready gss _ = do
   -- Launch default apps (with polling instead of threadDelay)
   sApps <- readTVarIO (gss ^. gssStartingApps)
   _ <- forkIO $ do
-    let waitForXwayland 0 = putStrLn "XWayland never became ready, giving up on default apps."
+    let waitForXwayland 0 = logPutStrLn "XWayland never became ready, giving up on default apps."
         waitForXwayland n = do
           exists <- System.Directory.doesFileExist "/run/user/1000/simula-0"
           if exists
             then do
-              putStrLn "XWayland ready, launching default apps."
+              logPutStrLn "XWayland ready, launching default apps."
               launchDefaultApps sApps "center"
             else do
               Control.Concurrent.yield
               waitForXwayland (n - 1)
     waitForXwayland 1000000 -- Poll many times since we yield instead of sleep
-  putStrLn $ "Queued default apps launch: " ++ (show sApps)
+  logPutStrLn $ "Queued default apps launch: " ++ (show sApps)
 
   case debugModeMaybe of
     Nothing -> return ()
@@ -869,7 +869,7 @@ ready gss _ = do
 
   where launchDefaultApps :: [String] -> String-> IO ()
         launchDefaultApps sApps location = do
-          putStrLn $ "Launching app in location: " ++ location
+          logPutStrLn $ "Launching app in location: " ++ location
           let firstApp = if (sApps == []) then Nothing else Just (head sApps)
           let tailApps = tail sApps
           pid <- case firstApp of
@@ -892,7 +892,7 @@ ready gss _ = do
 -- | to their signals. This implicitly starts the compositor.
 addWlrChildren :: GodotSimulaServer -> IO ()
 addWlrChildren gss = do
-  -- putStrLn "addWlrChildren"
+  -- logPutStrLn "addWlrChildren"
   -- Here we assume gss is already a node in our scene tree.
 
   -- WaylandDisplay
@@ -968,10 +968,10 @@ parseConfiguration = do
   maybeDataDir <- lookupEnv "SIMULA_DATA_DIR"
   maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
 
-  putStrLn $ "PROFILE = " ++ show profile
-  putStrLn $ "SIMULA_CONFIG_DIR = " ++ show maybeConfigDir
-  putStrLn $ "SIMULA_DATA_DIR = " ++ show maybeDataDir
-  putStrLn $ "SIMULA_APP_DIR = " ++ show maybeAppDir
+  logPutStrLn $ "PROFILE = " ++ show profile
+  logPutStrLn $ "SIMULA_CONFIG_DIR = " ++ show maybeConfigDir
+  logPutStrLn $ "SIMULA_DATA_DIR = " ++ show maybeDataDir
+  logPutStrLn $ "SIMULA_APP_DIR = " ++ show maybeAppDir
   let defaultConfiguration = Configuration { _backend = "OpenVR"
     , _startingApps = StartingApps 
         -- { _center = Just $ "ENV=val " ++ appDir ++ "/xfce4-terminal"
@@ -1033,7 +1033,7 @@ parseConfiguration = do
   let dataDir = fromMaybe (homeDir </> ".local" </> "share" </> "Simula") maybeDataDir
 
   config <- case profile of
-    Just _ -> do putStrLn "PROFILE mode detected; using defaultConfiguration"
+    Just _ -> do logPutStrLn "PROFILE mode detected; using defaultConfiguration"
                  return defaultConfiguration
     Nothing -> do
       let configPath = configDir </> "config.dhall"
@@ -1043,7 +1043,7 @@ parseConfiguration = do
           inputConfig <- input auto (T.pack configPath)
           return inputConfig
         else do
-          putStrLn "Unable to find config.dhall; using defaultConfiguration"
+          logPutStrLn "Unable to find config.dhall; using defaultConfiguration"
           return defaultConfiguration
 
   return config    
@@ -1052,7 +1052,7 @@ parseConfiguration = do
 -- | real values in `ready`.
 initGodotSimulaServer :: GodotObject -> IO (GodotSimulaServer)
 initGodotSimulaServer obj = do
-  -- putStrLn "initGodotSimulaServer"
+  -- logPutStrLn "initGodotSimulaServer"
   gssWaylandDisplay'       <- newTVarIO (error "Failed to initialize GodotSimulaServer") :: IO (TVar GodotWaylandDisplay)
   gssWlrBackend'           <- newTVarIO (error "Failed to initialize GodotSimulaServer") :: IO (TVar GodotWlrBackend)
   gssWlrOutput'            <- newTVarIO (error "Failed to initialize GodotSimulaServer") :: IO (TVar GodotWlrOutput)
@@ -1123,7 +1123,7 @@ initGodotSimulaServer obj = do
       let texStr = dataDir </> "environments" </> (configuration ^. environmentDefault)
       maybeDefaultTexture <- getTextureFromURL texStr -- Don't use "res://" ++ texStr since we need absolute system paths
       case maybeDefaultTexture of
-           Nothing -> do putStrLn "Can't set panorama texture!"
+           Nothing -> do logPutStrLn "Can't set panorama texture!"
            Just tex -> do G.set_panorama panoramaSky tex
       gssWorldEnvironment' <- newTVarIO (worldEnvironment, texStr)
       texturesStr <- loadEnvironmentTextures gss worldEnvironment
@@ -1267,7 +1267,7 @@ _on_WaylandDisplay_ready gss _ = do
 
 _on_WlrXdgShell_new_surface :: GodotSimulaServer -> [GodotVariant] -> IO ()
 _on_WlrXdgShell_new_surface gss [wlrXdgSurfaceVariant] = do
-  putStrLn "_on_WlrXdgShell_new_surface"
+  logPutStrLn "_on_WlrXdgShell_new_surface"
   wlrXdgSurface <- (fromGodotVariant wlrXdgSurfaceVariant :: IO GodotWlrXdgSurface) >>= validateSurfaceE
   roleInt <- G.get_role wlrXdgSurface
   case roleInt of
@@ -1276,7 +1276,7 @@ _on_WlrXdgShell_new_surface gss [wlrXdgSurfaceVariant] = do
         wlrSurface <- G.get_wlr_surface wlrXdgSurface >>= validateSurfaceE
         maybeGSVS <- readTVarIO (gss ^. gssActiveCursorGSVS)
         case maybeGSVS of
-          Nothing -> putStrLn "Unable to connect xdg popup surface signals; no gssActiveCursorGSVS!"
+          Nothing -> logPutStrLn "Unable to connect xdg popup surface signals; no gssActiveCursorGSVS!"
           Just gsvs -> do
             -- connectGodotSignal wlrSurface "new_subsurface" gsvs "handle_wlr_surface_new_subsurface" [] -- arguably don't need; subsumed by xdg new_popup signal
             -- connectGodotSignal wlrSurface "commit" gsvs "handle_wlr_surface_commit" []
@@ -1323,7 +1323,7 @@ _on_wlr_key gss [keyboardGVar, eventGVar] = do
   event <- fromGodotVariant eventGVar :: IO GodotWlrEventKeyboardKey
   -- time <- G.get_time_msec event
   -- key <- G.get_keycode event
-  -- putStrLn $ "_on_wlr_key: time=" ++ show time ++ " key=" ++ show key
+  -- logPutStrLn $ "_on_wlr_key: time=" ++ show time ++ " key=" ++ show key
   wlrSeat <- readTVarIO (gss ^. gssWlrSeat)
   G.reference event
   G.keyboard_notify_key wlrSeat event
@@ -1337,7 +1337,7 @@ _on_wlr_modifiers gss [keyboardGVar] = do
 
 _on_WlrXWayland_new_surface :: GodotSimulaServer -> [GodotVariant] -> IO ()
 _on_WlrXWayland_new_surface gss [wlrXWaylandSurfaceVariant] = do
-  putStrLn "_on_WlrXWayland_new_surface"
+  logPutStrLn "_on_WlrXWayland_new_surface"
   wlrXWaylandSurface <- (fromGodotVariant wlrXWaylandSurfaceVariant :: IO GodotWlrXWaylandSurface) >>= validateSurfaceE
   G.reference wlrXWaylandSurface
   simulaView <- newSimulaView gss wlrXWaylandSurface
@@ -1395,7 +1395,7 @@ _input gss [eventGV] = do
          (Just gsvs, G.BUTTON_WHEEL_UP) -> G.pointer_notify_axis_continuous wlrSeat 0 (realToFrac axisScrollSpeed)
          (Just gsvs, G.BUTTON_WHEEL_DOWN) -> G.pointer_notify_axis_continuous wlrSeat 0 (-1.0 * (realToFrac axisScrollSpeed))
          (Just gsvs, _) -> do
-           putStrLn $ "Mouse event button: " ++ show button
+           logPutStrLn $ "Mouse event button: " ++ show button
            screenshotMode <- readTVarIO (gsvs ^. gsvsScreenshotMode)
            case screenshotMode of
              False -> do activeGSVSCursorPos@(SurfaceLocalCoordinates (sx, sy)) <- readTVarIO (gsvs ^. gsvsCursorCoordinates)
@@ -1428,7 +1428,7 @@ _input gss [eventGV] = do
        G.BUTTON_WHEEL_DOWN  -> processKeypress gss modifiers G.KEY_BUTTON_WHEEL_DOWN pressed
        G.BUTTON_WHEEL_LEFT  -> processKeypress gss modifiers G.KEY_BUTTON_WHEEL_LEFT pressed
        G.BUTTON_WHEEL_RIGHT -> processKeypress gss modifiers G.KEY_BUTTON_WHEEL_RIGHT pressed
-       _ -> putStrLn $ "Unknown button: " ++ (show button)
+       _ -> logPutStrLn $ "Unknown button: " ++ (show button)
   
 
 updateCursorStateRelative :: GodotSimulaViewSprite -> Float -> Float -> IO ()
@@ -1535,18 +1535,18 @@ _on_simula_shortcut gss [scancodeWithModifiers', isPressed'] = do
   processKeypress gss modifiers keycode isPressed
 
   -- TEST CODE
-  -- putStrLn $ "isPressed: " ++ (show isPressed)
-  -- putStrLn $ "modifiers: " ++ (show modifiers)
-  -- putStrLn $ "keycode: " ++ (show keycode)
+  -- logPutStrLn $ "isPressed: " ++ (show isPressed)
+  -- logPutStrLn $ "modifiers: " ++ (show modifiers)
+  -- logPutStrLn $ "keycode: " ++ (show keycode)
 
   -- let testKeys = (foldl (.|.) 0 (extractTestKeys scancodeWithModifiers))
   -- let testKeys' = "testKeys': " ++ (show (extractTestKeys scancodeWithModifiers))
-  -- putStrLn $ "testKeys: " ++ (show testKeys)
-  -- putStrLn $ "G.KEY_A: " ++ (show (G.KEY_A))
-  -- putStrLn $ "G.KEY_B: " ++ (show (G.KEY_B))
-  -- putStrLn $ "G.KEY_BUTTON_LEFT: " ++ (show (G.KEY_BUTTON_LEFT))
-  -- putStrLn $ "G.KEY_CONTROL_L: " ++ (show (G.KEY_CONTROL_L))
-  -- putStrLn $ "G.KEY_MASK_CTRL: " ++ (show (G.KEY_MASK_CTRL))
+  -- logPutStrLn $ "testKeys: " ++ (show testKeys)
+  -- logPutStrLn $ "G.KEY_A: " ++ (show (G.KEY_A))
+  -- logPutStrLn $ "G.KEY_B: " ++ (show (G.KEY_B))
+  -- logPutStrLn $ "G.KEY_BUTTON_LEFT: " ++ (show (G.KEY_BUTTON_LEFT))
+  -- logPutStrLn $ "G.KEY_CONTROL_L: " ++ (show (G.KEY_CONTROL_L))
+  -- logPutStrLn $ "G.KEY_MASK_CTRL: " ++ (show (G.KEY_MASK_CTRL))
   
   where extractIf sc mod = if (sc .&. mod) /= 0 then [mod] else []
 
@@ -1559,7 +1559,7 @@ _on_simula_shortcut gss [scancodeWithModifiers', isPressed'] = do
 
 processKeypress :: GodotSimulaServer -> Modifiers -> Keycode -> Bool -> IO ()
 processKeypress gss modifiers keycode isPressed = do
-  -- putStrLn $ "processKeypress"
+  -- logPutStrLn $ "processKeypress"
   wlrKeyboard <- readTVarIO $ (gss ^. gssWlrKeyboard)
   keyboardShortcuts <- readTVarIO (gss ^. gssKeyboardShortcuts)
   keyboardRemappings <- readTVarIO (gss ^. gssKeyboardRemappings)
@@ -1571,14 +1571,14 @@ processKeypress gss modifiers keycode isPressed = do
         (Just remappedKeycode) -> remappedKeycode
         Nothing                -> keycode
 
-  putStrLn $ "modifiers: " ++ (show modifiers)
-  -- putStrLn $ "keycode': " ++ (show keycode')
+  logPutStrLn $ "modifiers: " ++ (show modifiers)
+  -- logPutStrLn $ "keycode': " ++ (show keycode')
 
   wasdMode <- readTVarIO (gss ^. gssWasdMode)
   let isMouseCode = isMouseButton keycode'
 
   case (maybeKeyboardAction, isMouseCode) of
-    (Just action, _) -> do putStrLn $ "action detected"
+    (Just action, _) -> do logPutStrLn $ "action detected"
                            action maybeHMDLookAtSprite isPressed
     (Nothing, False) -> case (isPressed, wasdMode) of
                              (False, False) -> do if (keycode' == keyNull) then return () else G.send_wlr_event_keyboard_key wlrKeyboard keycode' isPressed
@@ -1620,7 +1620,7 @@ launchXpra gss = do
   maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
   let appDir = fromMaybe "./result/bin" maybeAppDir
   case maybeXwaylandDisplay of
-    Nothing -> putStrLn "No DISPLAY found!"
+    Nothing -> logPutStrLn "No DISPLAY found!"
     (Just xwaylandDisplay) -> do
       let envMap = M.fromList originalEnv
       let envMapWithDisplay = M.insert "DISPLAY" xwaylandDisplay envMap
@@ -1632,19 +1632,19 @@ launchXpra gss = do
       case isXpraAlreadyLive of
         False -> do createSessionLeader (appDir ++ "/xpra") ["--fake-xinerama=no", "start", "--start", appDir ++ "/xfce4-terminal", ":13"] (Just envListWithDisplay)
                     waitForXpraRecursively appDir
-        True -> do putStrLn "xpra is already running!"
+        True -> do logPutStrLn "xpra is already running!"
       createSessionLeader (appDir ++ "/xpra") ["attach", ":13"] (Just envListWithDisplay)
       return ()
 
   where waitForXpraRecursively appDir = do
           (_,output',_) <- B.readCreateProcessWithExitCode (shell (appDir ++ "/xpra list")) ""
           let output = B.unpack output'
-          putStrLn $ "Output is: " ++ output
+          logPutStrLn $ "Output is: " ++ output
           let isXpraAlreadyLive = isInfixOf ":13" output
           case isXpraAlreadyLive of
-            False -> do putStrLn $ "Waiting for xpra server.."
+            False -> do logPutStrLn $ "Waiting for xpra server.."
                         waitForXpraRecursively appDir
-            True -> do putStrLn "xpra server found!"
+            True -> do logPutStrLn "xpra server found!"
 
 createSessionLeader :: FilePath -> [String] -> Maybe [(String, String)] -> IO (ProcessID, ProcessGroupID)
 createSessionLeader exe args env = do
@@ -1673,11 +1673,11 @@ toggleGrabMode = do
 
 handle_wlr_compositor_new_surface :: GodotSimulaServer -> [GodotVariant] -> IO ()
 handle_wlr_compositor_new_surface gss args@[wlrSurfaceVariant] = do
-  putStrLn "handle_wlr_compositor_new_surface"
+  logPutStrLn "handle_wlr_compositor_new_surface"
   wlrSurface <- (fromGodotVariant wlrSurfaceVariant :: IO GodotWlrSurface) >>= validateSurfaceE
   maybeGSVS <- readTVarIO (gss ^. gssActiveCursorGSVS)
   case maybeGSVS of
-    Nothing -> return () -- putStrLn "Unable to handle_wlr_compositor_new_surface; no gssActiveCursorGSVS!"
+    Nothing -> return () -- logPutStrLn "Unable to handle_wlr_compositor_new_surface; no gssActiveCursorGSVS!"
     Just gsvs -> do
       connectGodotSignal wlrSurface "new_subsurface" gsvs "handle_wlr_surface_new_subsurface" []
       connectGodotSignal wlrSurface "commit" gsvs "handle_wlr_surface_commit" []
@@ -1689,6 +1689,6 @@ seat_request_cursor gss args@[wlrSurfaceCursorVariant] = do
   wlrSurfaceCursor <- (fromGodotVariant wlrSurfaceCursorVariant :: IO GodotWlrSurface) >>= validateSurfaceE
   maybeActiveCursorGSVS <- readTVarIO (gss ^. gssActiveCursorGSVS)
   case maybeActiveCursorGSVS of
-      Nothing -> putStrLn "Unable to find active cursor gsvs; unable to load cursor texture."
+      Nothing -> logPutStrLn "Unable to find active cursor gsvs; unable to load cursor texture."
       Just gsvs -> atomically $ writeTVar (gsvs ^. gsvsCursor) ((Just wlrSurfaceCursor), Nothing)
   return ()

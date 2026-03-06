@@ -223,27 +223,13 @@
               export SIMULA_APP_DIR="'$out'/bin"
 
               if grep -qi NixOS /etc/os-release; then
-                if command -v steam-run > /dev/null; then
-                  echo "NixOS detected. Running Simula with steam-run..."
-                  steam-run env \
-                    SIMULA_LOG_DIR="$SIMULA_LOG_DIR" \
-                    SIMULA_DATA_DIR="$SIMULA_DATA_DIR" \
-                    SIMULA_CONFIG_DIR="$SIMULA_CONFIG_DIR" \
-                    SIMULA_APP_DIR="$SIMULA_APP_DIR" \
-                    XKB_DEFAULT_LAYOUT="us" \
-                    XKB_DEFAULT_VARIANT="" \
-                    XKB_DEFAULT_OPTIONS="" \
-                    XKB_CONFIG_ROOT="${pkgs.xorg.xkeyboardconfig}/share/X11/xkb" \
-                    XR_RUNTIME_JSON="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json" \
-                    godot -m "'$out'"/opt/simula/project.godot
-                else
+                  echo "NixOS detected. Running Simula..."
                   export XR_RUNTIME_JSON="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
                   export XKB_DEFAULT_LAYOUT="us"
                   export XKB_DEFAULT_VARIANT=""
                   export XKB_DEFAULT_OPTIONS=""
                   export XKB_CONFIG_ROOT="${pkgs.xorg.xkeyboardconfig}/share/X11/xkb"
                   godot -m "'$out'"/opt/simula/project.godot
-                fi
               else
                 echo "Detects non-NixOS distribution. Running Simula with nixGL..."
                 nix run --impure github:nix-community/nixGL -- godot -m "'$out'"/opt/simula/project.godot

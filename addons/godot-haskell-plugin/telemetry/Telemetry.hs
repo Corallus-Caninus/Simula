@@ -91,7 +91,7 @@ ensureUUIDIsRegistered uuid = do
   -- Construct the 'Request'
   eitherErrorOrInitialRequest <- try $ parseRequest "http://api.mixpanel.com/engage/" :: IO (Either HttpException Request)
   case eitherErrorOrInitialRequest of
-    Left error -> putStrLn "MixPanel parseRequest error!"
+    Left error -> logPutStrLn "MixPanel parseRequest error!"
     Right initialRequest -> do let request = initialRequest
                                     { method = "POST"
                                     , queryString = requestQueryString
@@ -99,7 +99,7 @@ ensureUUIDIsRegistered uuid = do
                                     }
                                eitherErrorOrResponse <- try $ httpLbs request manager :: IO (Either HttpException (Response LBS.ByteString))
                                case eitherErrorOrResponse of
-                                 Left _ -> putStrLn "MixPanel httpLbs error!"
+                                 Left _ -> logPutStrLn "MixPanel httpLbs error!"
                                  Right _ -> return ()
   return ()
 
@@ -124,7 +124,7 @@ forkSendAppLaunchEvent uuid = forkIO $ do
   -- Construct the 'Request'
   eitherErrorOrInitialRequest <- try $ parseRequest "http://api.mixpanel.com/engage/" :: IO (Either HttpException Request)
   case eitherErrorOrInitialRequest of
-    Left error -> putStrLn "MixPanel parseRequest error!"
+    Left error -> logPutStrLn "MixPanel parseRequest error!"
     Right initialRequest -> do let request = initialRequest
                                     { method = "POST"
                                     , queryString = requestQueryString
@@ -132,7 +132,7 @@ forkSendAppLaunchEvent uuid = forkIO $ do
                                     }
                                eitherErrorOrResponse <- try $ httpLbs request manager :: IO (Either HttpException (Response LBS.ByteString))
                                case eitherErrorOrResponse of
-                                 Left _ -> putStrLn "MixPanel httpLbs error!"
+                                 Left _ -> logPutStrLn "MixPanel httpLbs error!"
                                  Right _ -> return ()
 
 forkSendPayloadEveryMinuteInterval :: UUID -> TVar SurfaceTelemetryMap -> Integer -> IO ThreadId
@@ -145,7 +145,7 @@ forkSendPayloadEveryMinuteInterval uuid tvarSurfaceTelemetryMap min = forkIO $ (
                                       , minutesElapsedSinceLastPayload = (fromIntegral min)
                                       , minutesTotalSession = (dbl + (fromIntegral min))
                                       })
-        putStrLn $ "minutesTotalSession: " ++ (show (dbl + (fromIntegral min)))
+        logPutStrLn $ "minutesTotalSession: " ++ (show (dbl + (fromIntegral min)))
         doLoop (dbl + (fromIntegral min))
 
 forkSendPayload :: UUID -> Payload -> IO ()

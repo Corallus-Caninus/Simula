@@ -113,7 +113,7 @@ import qualified Language.C.Types as C
 
 setInputHandled :: (GodotNode :< a) => a -> IO ()
 setInputHandled self = do
-  -- putStrLn "setInputHandled"
+  -- logPutStrLn "setInputHandled"
   st <- G.get_tree (safeCast self :: GodotNode)
   G.set_input_as_handled st
 

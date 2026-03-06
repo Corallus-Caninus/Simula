@@ -75,7 +75,7 @@ initVR node vri =
 -- | Find the interface for the given backend
 findInterface :: VRBackend -> IO GodotARVRInterface
 findInterface vri = do
-  putStrLn $ "Loading VR backend: " ++ show vri
+  logPutStrLn $ "Loading VR backend: " ++ show vri
   vriStr <- toLowLevel $ pack $ show vri
   getSingleton GodotARVRServer "ARVRServer"
     >>= (`G.find_interface` vriStr)

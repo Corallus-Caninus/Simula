@@ -75,16 +75,16 @@ instance NativeScript GodotLeapMotion where
 
 _ready :: GodotLeapMotion -> [GodotVariant] -> IO ()
 _ready glm args = do
-  putStrLn $ "GodotLeapMotion _ready"
+  logPutStrLn $ "GodotLeapMotion _ready"
   gss <- readTVarIO (glm ^. glmServer)
-  putStrLn $ "GodotLeapMotion _ready"
+  logPutStrLn $ "GodotLeapMotion _ready"
   gss <- readTVarIO (glm ^. glmServer)
 
   connectGodotSignal glm "new_hand" glm "_new_hand" [] -- emmitted from gldm_sensor.cpp
   connectGodotSignal glm "about_to_remove_hand" glm "_about_to_remove_hand" [] -- emmitted from gldm_sensor.cpp
 
   -- Enable visible collision regions for easier debugging
-  putStrLn $ "Engaging Godot debug collisions.."
+  logPutStrLn $ "Engaging Godot debug collisions.."
   sceneTree <- G.get_tree gss
   G.set_debug_collisions_hint sceneTree True
 
@@ -195,7 +195,7 @@ _physics_process glm args@[deltaGV] = do
           staticGrab glm gsvs1 LeftHand
         (_, PinchGrabbed gsvs2) -> do
           staticGrab glm gsvs2 RightHand
-        _ -> return () -- >> putStrLn $ "Not PinchGrabbed!"
+        _ -> return () -- >> logPutStrLn $ "Not PinchGrabbed!"
       atomically $ writeTVar (glm ^. glmLeftHandState) leftHandState
       atomically $ writeTVar (glm ^. glmRightHandState) rightHandState
 
@@ -216,7 +216,7 @@ staticGrab glm gsvs handSide = do
 
 _new_hand :: GodotLeapMotion -> [GodotVariant] -> IO ()
 _new_hand glm args@[godotSpatialHand', handType'] = do
-  putStrLn "_new_hand"
+  logPutStrLn "_new_hand"
   godotSpatialHand <- fromGodotVariant godotSpatialHand' :: IO GodotSpatial
   handType <- fromGodotVariant handType' :: IO Int
 
@@ -250,63 +250,63 @@ _new_hand glm args@[godotSpatialHand', handType'] = do
       }
 
   case handType of
-        0 -> do putStrLn "CONNECTING LEFT HAND SIGNALS"
+        0 -> do logPutStrLn "CONNECTING LEFT HAND SIGNALS"
                 connectGodotSignal godotArea "body_shape_entered" glm "_hand_intersect_left" [] -- emmitted from gldm_sensor.cpp
                 connectGodotSignal godotArea "body_shape_exited" glm "_hand_exit_left" [] -- emmitted from gldm_sensor.cpp
                 atomically $ writeTVar (glm ^. glmLeftHand) (Just newLeapHand)
-        1 -> do putStrLn "CONNECTING RIGHT_HAND SIGNALS"
+        1 -> do logPutStrLn "CONNECTING RIGHT_HAND SIGNALS"
                 connectGodotSignal godotArea "body_shape_entered" glm "_hand_intersect_right" [] -- emmitted from gldm_sensor.cpp
 
                 connectGodotSignal godotArea "body_shape_exited" glm "_hand_exit_right" [] -- emmitted from gldm_sensor.cpp
                 atomically $ writeTVar (glm ^. glmRightHand) (Just newLeapHand)
-        n -> putStrLn $ "handType: " ++ (show n)
+        n -> logPutStrLn $ "handType: " ++ (show n)
 
   atomically $ modifyTVar' (glm ^. glmHandCount) (+1)
   hc <- readTVarIO (glm ^. glmHandCount)
-  putStrLn $ "_new_hand " ++ (show hc)
+  logPutStrLn $ "_new_hand " ++ (show hc)
   if (hc >= 2) then G.set_physics_process glm True else return ()
 
 _hand_intersect_left :: GodotLeapMotion -> [GodotVariant] -> IO ()
 _hand_intersect_left glm args@[bodyId', body', bodyShape', localShape'] = do
-  putStrLn "_hand_intersect_left"
+  logPutStrLn "_hand_intersect_left"
   body <- fromGodotVariant body' :: IO GodotNode
   isLeftPinched <- G.get_is_pinched_left glm
   isLeftGrabbed <- G.get_is_grabbed_left glm
   maybeGSVS <- asNativeScript ((safeCast body) :: GodotObject) :: IO (Maybe GodotSimulaViewSprite)
 
   case (maybeGSVS, isLeftPinched, isLeftGrabbed) of
-       (Nothing, _, _) -> putStrLn "_hand_intersect with non-GSVS object"
+       (Nothing, _, _) -> logPutStrLn "_hand_intersect with non-GSVS object"
        (_, True, _) -> do return () -- Make interaction with a gsvs while already pinched
        (_, _, True) -> do return () -- ..or gripped impossible
        (Just gsvs, False, False) -> atomically $ writeTVar (glm ^. glmLeftHandState) (Intersected gsvs)
 
 _hand_intersect_right :: GodotLeapMotion -> [GodotVariant] -> IO ()
 _hand_intersect_right glm args@[bodyId', body', bodyShape', localShape'] = do
-  putStrLn "_hand_intersect_right"
+  logPutStrLn "_hand_intersect_right"
   body <- fromGodotVariant body' :: IO GodotNode
   isRightPinched <- G.get_is_pinched_right glm
   isRightGrabbed <- G.get_is_grabbed_right glm
   maybeGSVS <- asNativeScript ((safeCast body) :: GodotObject) :: IO (Maybe GodotSimulaViewSprite)
 
   case (maybeGSVS, isRightPinched, isRightGrabbed) of
-       (Nothing, _, _) -> putStrLn "_hand_intersect with non-GSVS object"
+       (Nothing, _, _) -> logPutStrLn "_hand_intersect with non-GSVS object"
        (_, True, _) -> do return () -- Make interaction with a gsvs while already pinched
        (_, _, True) -> do return () -- ..or gripped impossible
        (Just gsvs, False, False) -> atomically $ writeTVar (glm ^. glmRightHandState) (Intersected gsvs)
 
 _hand_exit_left :: GodotLeapMotion -> [GodotVariant] -> IO ()
 _hand_exit_left glm args@[bodyId', body', bodyShape', localShape'] = do
-  putStrLn $ "_hand_exit_left"
+  logPutStrLn $ "_hand_exit_left"
   atomically $ writeTVar (glm ^. glmRightHandState) NonIntersected
 
 _hand_exit_right :: GodotLeapMotion -> [GodotVariant] -> IO ()
 _hand_exit_right glm args@[bodyId', body', bodyShape', localShape'] = do
-  putStrLn $ "_hand_exit_right"
+  logPutStrLn $ "_hand_exit_right"
   atomically $ writeTVar (glm ^. glmRightHandState) NonIntersected
 
 twoHandScale :: GodotLeapMotion -> GodotSimulaViewSprite -> GodotSimulaViewSprite -> IO ()
 twoHandScale glm gsvs1 gsvs2 = do
-  putStrLn $ "twoHandScale"
+  logPutStrLn $ "twoHandScale"
   maybeOldDist <- readTVarIO (glm ^. glmPinchDist)
 
   gss <- readTVarIO (gsvs1 ^. gsvsServer)
@@ -329,15 +329,15 @@ twoHandScale glm gsvs1 gsvs2 = do
 
 twoHandScaleViaLeap :: GodotLeapMotion -> GodotSimulaViewSprite -> GodotSimulaViewSprite -> IO ()
 twoHandScaleViaLeap glm gsvs1 gsvs2 = do
-  putStrLn $ "twoHandScaleViaLeap"
+  logPutStrLn $ "twoHandScaleViaLeap"
   scale <- G.get_hands_scale_factor glm
-  putStrLn $ "scale: " ++ (show scale)
+  logPutStrLn $ "scale: " ++ (show scale)
   toLowLevel (V3 scale scale scale) >>= G.scale_object_local ((safeCast gsvs1) :: GodotSpatial)
 
 -- TODO: Clean up state here, if needed
 _about_to_remove_hand :: GodotLeapMotion -> [GodotVariant] -> IO ()
 _about_to_remove_hand glm args@[handSpatial'] = do
-  putStrLn "_about_to_remove_hand"
+  logPutStrLn "_about_to_remove_hand"
   -- TODO: Bifurcate the "about_to_remove_hand" signal into a "*_left" and "*_right", to help clean up state
   -- handSpatial <- fromGodotVariant handSpatial' :: IO GodotNode
   -- leftHand <- readTVarIO (glm ^. glmLeftHand)

@@ -73,7 +73,7 @@ ready self _ = do
                               case backend of
                                 "OpenVR" -> return openVR
                                 "OpenXR" -> return openXR
-                                _        -> do putStrLn "Unable to parse backend; defaulting to OpenVR"
+                                _        -> do logPutStrLn "Unable to parse backend; defaulting to OpenVR"
                                                return openVR
     (Just gss, _) -> return openXR
     (Nothing, _) -> do return openVR
@@ -81,12 +81,12 @@ ready self _ = do
   debugModeMaybe <- lookupEnv "DEBUG"
   rrModeMaybe <- lookupEnv "RUNNING_UNDER_RR"
   case (rrModeMaybe, debugModeMaybe) of
-    (Just rrModeVal, _)  -> putStrLn "RUNNING_UNDER_RR detected: not launching VR"
-    (_, Just debugModeVal)  -> putStrLn "DEBUG mode detected: not launching VR"
+    (Just rrModeVal, _)  -> logPutStrLn "RUNNING_UNDER_RR detected: not launching VR"
+    (_, Just debugModeVal)  -> logPutStrLn "DEBUG mode detected: not launching VR"
     _ ->
       do openBackend >>= initVR (safeCast self) >>= \case
                 InitVRSuccess -> do
-                  putStrLn "InitVRSuccess"
+                  logPutStrLn "InitVRSuccess"
                   vrViewport <- unsafeInstance GodotViewport "Viewport"
 
                   G.set_name vrViewport =<< toLowLevel "VRViewport"
@@ -111,7 +111,7 @@ ready self _ = do
                   addCt "RightController" 2 >>= connectController
                   return ()
 
-                InitVRFailed  -> putStrLn "InitVRFailed"
+                InitVRFailed  -> logPutStrLn "InitVRFailed"
 
   gpcObj <- "res://addons/godot-haskell-plugin/PancakeCamera.gdns"
     & newNS' [] :: IO GodotObject
@@ -156,7 +156,7 @@ ready self _ = do
 
   connectController :: GodotSimulaController -> IO ()
   connectController ct = do
-    -- putStrLn "connectController"
+    -- logPutStrLn "connectController"
     argsPressed <- Api.godot_array_new
     ctA <- toLowLevel $ toVariant $ asObj ct :: IO GodotVariant
     ctB <- toLowLevel $ toVariant $ asObj ct :: IO GodotVariant
@@ -186,7 +186,7 @@ ready self _ = do
 
 on_button_signal :: GodotSimula -> [GodotVariant] -> IO ()
 on_button_signal self [buttonVar, controllerVar, pressedVar] = do
-  -- putStrLn "on_button_signal in Simula.hs"
+  -- logPutStrLn "on_button_signal in Simula.hs"
   button <- fromGodotVariant buttonVar
   controllerObj <- fromGodotVariant controllerVar
   maybeController <- asNativeScript controllerObj -- tryObjectCast controllerObj
@@ -199,7 +199,7 @@ on_button_signal self [buttonVar, controllerVar, pressedVar] = do
 
 onButton :: GodotSimula -> GodotSimulaController -> Int -> Bool -> IO ()
 onButton self gsc button pressed = do
-  -- putStrLn "onButton in Simula.hs"
+  -- logPutStrLn "onButton in Simula.hs"
   case (button, pressed) of
     (OVR_Button_Grip, False) -> -- Release grabbed
       readTVarIO gst
@@ -231,7 +231,7 @@ onButton self gsc button pressed = do
 
 process :: GodotSimula -> [GodotVariant] -> IO ()
 process self _ = do
-  -- putStrLn "process in Simula.hs"
+  -- logPutStrLn "process in Simula.hs"
   let gst = _sGrabState self
   atomically (readTVar gst)
     >>= handleState

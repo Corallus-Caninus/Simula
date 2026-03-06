@@ -16,7 +16,7 @@ import           Plugin.LeapMotion
 
 registerClasses :: GdnativeHandle -> IO ()
 registerClasses desc = do
-  putStrLn "!!!!!! Haskell registerClasses STARTING !!!!!!"
+  logPutStrLn "!!!!!! Haskell registerClasses STARTING !!!!!!"
   let reg constr = registerClass $ RegClass desc constr
   reg $ classInit @GodotSimula
   reg $ classInit @GodotSimulaController
