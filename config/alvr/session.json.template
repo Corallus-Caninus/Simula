@@ -27,13 +27,13 @@
     "controller_is_tracker": false,
     "controllers_enabled": false,
     "enable_foveated_encoding": true,
-    "foveation_center_size_x": 0.5,
-    "foveation_center_size_y": 0.5,
+    "foveation_center_size_x": 0.55,
+    "foveation_center_size_y": 0.55,
     "foveation_center_shift_x": 0.4,
     "foveation_center_shift_y": 0.1,
     "foveation_edge_ratio_x": 4.0,
     "foveation_edge_ratio_y": 5.0,
-    "enable_color_correction": true,
+    "enable_color_correction": false,
     "brightness": 0.0,
     "contrast": 0.0,
     "saturation": 0.5,
@@ -43,8 +43,8 @@
     "linux_async_reprojection": false,
     "nvenc_quality_preset": 7,
     "nvenc_tuning_preset": 1,
-    "nvenc_multi_pass": 2,
-    "nvenc_adaptive_quantization_mode": 1,
+    "nvenc_multi_pass": 0,
+    "nvenc_adaptive_quantization_mode": 0,
     "nvenc_low_delay_key_frame_scale": -1,
     "nvenc_refresh_rate": -1,
     "enable_intra_refresh": false,
@@ -70,7 +70,7 @@
       "gui_collapsed": false,
       "adapter_index": 0,
       "transcoding_view_resolution": {
-        "Scale": 1.0,
+        "Scale": 1.5,
         "Absolute": {
           "width": 2064,
           "height": {
@@ -78,7 +78,7 @@
             "content": 2208
           }
         },
-        "variant": "Absolute"
+        "variant": "Scale"
       },
       "emulated_headset_view_resolution": {
         "Scale": 1.5,
@@ -98,7 +98,7 @@
       "bitrate": {
         "gui_collapsed": false,
         "mode": {
-          "ConstantMbps": 500,
+          "ConstantMbps": 1000,
           "Adaptive": {
             "gui_collapsed": false,
             "saturation_multiplier": 0.95,
@@ -130,7 +130,7 @@
               }
             }
           },
-          "variant": "Adaptive"
+          "variant": "ConstantMbps"
         },
         "adapt_to_framerate": {
           "enabled": true,
@@ -166,10 +166,10 @@
             "variant": "HighQuality"
           },
           "multi_pass": {
-            "variant": "FullResolution"
+            "variant": "Disabled"
           },
           "adaptive_quantization_mode": {
-            "variant": "Spatial"
+            "variant": "Disabled"
           },
           "low_delay_key_frame_scale": -1,
           "refresh_rate": -1,
@@ -249,8 +249,8 @@
         "enabled": true,
         "content": {
           "gui_collapsed": false,
-          "center_size_x": 0.5,
-          "center_size_y": 0.5,
+          "center_size_x": 0.55,
+          "center_size_y": 0.55,
           "center_shift_x": 0.4,
           "center_shift_y": 0.1,
           "edge_ratio_x": 4.0,
@@ -258,7 +258,7 @@
         }
       },
       "clientside_foveation": {
-        "enabled": false,
+        "enabled": true,
         "content": {
           "gui_collapsed": false,
           "mode": {
@@ -278,7 +278,7 @@
         }
       },
       "color_correction": {
-        "enabled": true,
+        "enabled": false,
         "content": {
           "gui_collapsed": false,
           "brightness": 0.0,
