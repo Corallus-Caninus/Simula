@@ -154,6 +154,7 @@
               pkgs.xorg.libXdamage
               pkgs.xorg.libXi
               pkgs.xorg.libXtst
+              pkgs.fira-code
             ];
 
             dontUnpack = true;
@@ -208,6 +209,7 @@
                   pkgs.procps
                   pkgs.bottom
                   pkgs.steam-run
+                  pkgs.fira-code
                 ]
               }:$PATH"
 

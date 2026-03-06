@@ -38,7 +38,7 @@
     "contrast": 0.0,
     "saturation": 0.5,
     "gamma": 1.0,
-    "sharpening": 0.5,
+    "sharpening": 0.75,
     "linux_async_compute": false,
     "linux_async_reprojection": false,
     "nvenc_quality_preset": 7,
@@ -285,7 +285,7 @@
           "contrast": 0.0,
           "saturation": 0.5,
           "gamma": 1.0,
-          "sharpening": 0.5
+          "sharpening": 0.75
         }
       }
     },

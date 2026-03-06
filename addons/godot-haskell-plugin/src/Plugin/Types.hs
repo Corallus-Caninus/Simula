@@ -1016,7 +1016,10 @@ terminalLaunch gss maybeLocation = do
   terminalPath <- System.Directory.doesFileExist (appDir ++ "/kitty") >>= \case
     True -> return (appDir ++ "/kitty")
     False -> return "kitty"
-  appLaunch gss (terminalPath ++ " bash -i") maybeLocation
+  let kittyFontArgs = if "kitty" `Data.List.isInfixOf` terminalPath
+                      then " -o font_family=\"Fira Code\""
+                      else ""
+  appLaunch gss (terminalPath ++ kittyFontArgs ++ " bash -i") maybeLocation
 
 getTextureFromURL :: String -> IO (Maybe GodotTexture)
 getTextureFromURL urlStr = do
