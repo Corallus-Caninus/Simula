@@ -1,11 +1,14 @@
 {
   "server_version": "20.6.1",
-  "drivers_backup": null,
+  "drivers_backup": {
+    "alvr_path": "/nix/store/7iac1dq95ghykz082ja9plhz5l992gg0-alvr-20.6.1-extracted/usr/lib64/alvr",
+    "other_paths": []
+  },
   "openvr_config": {
-    "eye_resolution_width": 2048,
-    "eye_resolution_height": 2144,
-    "target_eye_resolution_width": 2592,
-    "target_eye_resolution_height": 2720,
+    "eye_resolution_width": 3008,
+    "eye_resolution_height": 3168,
+    "target_eye_resolution_width": 3360,
+    "target_eye_resolution_height": 3520,
     "tracking_ref_only": false,
     "enable_vive_tracker_proxy": false,
     "aggressive_keyframe_resend": false,
@@ -26,13 +29,13 @@
     "sw_thread_count": 0,
     "controller_is_tracker": false,
     "controllers_enabled": false,
-    "enable_foveated_encoding": false,
-    "foveation_center_size_x": 0.0,
-    "foveation_center_size_y": 0.0,
-    "foveation_center_shift_x": 0.0,
-    "foveation_center_shift_y": 0.0,
-    "foveation_edge_ratio_x": 0.0,
-    "foveation_edge_ratio_y": 0.0,
+    "enable_foveated_encoding": true,
+    "foveation_center_size_x": 0.5,
+    "foveation_center_size_y": 0.5,
+    "foveation_center_shift_x": 0.4,
+    "foveation_center_shift_y": 0.1,
+    "foveation_edge_ratio_x": 4.0,
+    "foveation_edge_ratio_y": 5.0,
     "enable_color_correction": false,
     "brightness": 0.0,
     "contrast": 0.0,
@@ -67,7 +70,9 @@
     "6905.client": {
       "display_name": "Quest 3",
       "current_ip": "192.168.6.129",
-      "manual_ips": [],
+      "manual_ips": [
+        "0.0.0.0"
+      ],
       "trusted": true,
       "connection_state": "Streaming",
       "cabled": false
@@ -78,7 +83,7 @@
       "gui_collapsed": false,
       "adapter_index": 0,
       "transcoding_view_resolution": {
-        "Scale": 1.22,
+        "Scale": 1.8,
         "Absolute": {
           "width": 2064,
           "height": {
@@ -89,7 +94,7 @@
         "variant": "Scale"
       },
       "emulated_headset_view_resolution": {
-        "Scale": 1.55,
+        "Scale": 2.0,
         "Absolute": {
           "width": 3096,
           "height": {
@@ -138,7 +143,7 @@
               }
             }
           },
-          "variant": "ConstantMbps"
+          "variant": "Adaptive"
         },
         "adapt_to_framerate": {
           "enabled": true,
@@ -254,11 +259,11 @@
         ]
       },
       "foveated_encoding": {
-        "enabled": false,
+        "enabled": true,
         "content": {
           "gui_collapsed": false,
-          "center_size_x": 0.8,
-          "center_size_y": 0.8,
+          "center_size_x": 0.5,
+          "center_size_y": 0.5,
           "center_shift_x": 0.4,
           "center_shift_y": 0.1,
           "edge_ratio_x": 4.0,
