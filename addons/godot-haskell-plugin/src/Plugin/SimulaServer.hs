@@ -156,6 +156,10 @@ getKeyboardAction gss keyboardShortcut =
     "rotateWorkspaceHorizontallyRight" -> rotateWorkspaceHorizontally gss (-0.15707963)
     "rotateWorkspacesHorizontallyLeft" -> rotateWorkspacesHorizontally gss (0.15707963)
     "rotateWorkspacesHorizontallyRight" -> rotateWorkspacesHorizontally gss (-0.15707963)
+    "rotateWorkspaceVerticallyUp" -> rotateWorkspaceVertically gss (0.15707963)
+    "rotateWorkspaceVerticallyDown" -> rotateWorkspaceVertically gss (-0.15707963)
+    "rotateWorkspacesVerticallyUp" -> rotateWorkspacesVertically gss (0.15707963)
+    "rotateWorkspacesVerticallyDown" -> rotateWorkspacesVertically gss (-0.15707963)
     "toggleARMode" -> toggleARMode gss
     "toggleWasdMode" -> toggleWasdMode gss
     "addLeapMotion" -> addLeapMotion gss
@@ -253,6 +257,20 @@ getKeyboardAction gss keyboardShortcut =
           Plugin.Types.rotateWorkspaceHorizontally gss radians Workspaces
           return ()
         rotateWorkspacesHorizontally gss radians _ False = do
+          return ()
+
+        rotateWorkspaceVertically :: GodotSimulaServer -> Float -> SpriteLocation -> Bool -> IO ()
+        rotateWorkspaceVertically gss radians _ True = do
+          Plugin.Types.rotateWorkspaceVertically gss radians Workspace
+          return ()
+        rotateWorkspaceVertically gss radians _ False = do
+          return ()
+
+        rotateWorkspacesVertically :: GodotSimulaServer -> Float -> SpriteLocation -> Bool -> IO ()
+        rotateWorkspacesVertically gss radians _ True = do
+          Plugin.Types.rotateWorkspaceVertically gss radians Workspaces
+          return ()
+        rotateWorkspacesVertically gss radians _ False = do
           return ()
 
         recordScreen :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
@@ -1010,6 +1028,10 @@ parseConfiguration = do
         , KeyboardShortcut ["KEY_MASK_META", "KEY_PERIOD"] "pushWindow"
         , KeyboardShortcut ["KEY_MASK_META", "KEY_W"] "launchHMDWebCam"
         , KeyboardShortcut ["KEY_MASK_META", "KEY_R"] "emacsclient -c"
+        , KeyboardShortcut ["KEY_MASK_META", "KEY_MASK_CTRL", "KEY_LEFT"] "rotateWorkspaceHorizontallyLeft"
+        , KeyboardShortcut ["KEY_MASK_META", "KEY_MASK_CTRL", "KEY_RIGHT"] "rotateWorkspaceHorizontallyRight"
+        , KeyboardShortcut ["KEY_MASK_META", "KEY_MASK_CTRL", "KEY_UP"] "rotateWorkspaceVerticallyUp"
+        , KeyboardShortcut ["KEY_MASK_META", "KEY_MASK_CTRL", "KEY_DOWN"] "rotateWorkspaceVerticallyDown"
         , KeyboardShortcut ["KEY_MASK_META", "KEY_MASK_SHIFT", "KEY_ESCAPE"] "terminateSimula"
         , KeyboardShortcut ["KEY_MASK_META", "KEY_MASK_ALT", "KEY_UP"] "increaseTransparency"
         , KeyboardShortcut ["KEY_MASK_META", "KEY_MASK_ALT", "KEY_DOWN"] "decreaseTransparency"

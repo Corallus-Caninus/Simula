@@ -1658,6 +1658,28 @@ rotateWorkspaceHorizontally gss radians rotationMethod = do
   -- update new diff map
   return ()
 
+rotateWorkspaceVertically :: GodotSimulaServer -> Float -> RotationMethod -> IO ()
+rotateWorkspaceVertically gss radians rotationMethod = do
+  -- get state
+  prevPovTransform <- getARVRCameraOrPancakeCameraTransform gss
+  povTransform <- getARVRCameraOrPancakeCameraTransform gss
+  (currentWorkspace, currentWorkspaceStr) <- readTVarIO (gss ^. gssWorkspace)
+  currentWorkspaceTransform <- G.get_transform currentWorkspace
+
+  -- compute new transform
+  rotationAxisX <- toLowLevel (V3 1 0 0) :: IO GodotVector3
+  case rotationMethod of
+      Workspace -> do
+        G.rotate currentWorkspace rotationAxisX radians
+        currentWorkspaceTransform <- G.get_transform currentWorkspace
+        updateDiffMap gss currentWorkspace currentWorkspaceTransform
+      Workspaces -> do
+        G.rotate gss rotationAxisX radians
+        updateDiffMap gss (safeCast gss) currentWorkspaceTransform
+
+  -- update new diff map
+  return ()
+
 queueFreeNodeAndChildren :: GodotNode -> IO ()
 queueFreeNodeAndChildren node = do
   arrayOfChildren <- G.get_children node :: IO GodotArray

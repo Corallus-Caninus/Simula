@@ -49,6 +49,10 @@ let Configuration =
                               , { _keyCombination = ["KEY_MASK_META", "KEY_PERIOD"]                    , _keyAction = "pushWindow"                 }
                               , { _keyCombination = ["KEY_MASK_META", "KEY_W"]                         , _keyAction = "toggleWasdMode"            }
                               , { _keyCombination = ["KEY_MASK_META", "KEY_R"]                         , _keyAction = "reloadConfig"               }
+                              , { _keyCombination = ["KEY_MASK_META", "KEY_MASK_CTRL", "KEY_LEFT"]      , _keyAction = "rotateWorkspaceHorizontallyLeft" }
+                              , { _keyCombination = ["KEY_MASK_META", "KEY_MASK_CTRL", "KEY_RIGHT"]     , _keyAction = "rotateWorkspaceHorizontallyRight" }
+                              , { _keyCombination = ["KEY_MASK_META", "KEY_MASK_CTRL", "KEY_UP"]        , _keyAction = "rotateWorkspaceVerticallyUp" }
+                              , { _keyCombination = ["KEY_MASK_META", "KEY_MASK_CTRL", "KEY_DOWN"]      , _keyAction = "rotateWorkspaceVerticallyDown" }
                               , { _keyCombination = ["KEY_MASK_META", "KEY_MASK_SHIFT", "KEY_ESCAPE"]  , _keyAction = "terminateSimula"            }
                               , { _keyCombination = ["KEY_MASK_META", "KEY_MASK_ALT", "KEY_UP"]        , _keyAction = "increaseTransparency"       }
                               , { _keyCombination = ["KEY_MASK_META", "KEY_MASK_ALT", "KEY_DOWN"]      , _keyAction = "decreaseTransparency"       }
