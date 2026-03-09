@@ -92,8 +92,8 @@ if \"steamvr\" not in data:
 data[\"steamvr\"][\"renderTargetScale\"] = 1.3
 # Ensure the manual scale override is enabled
 data[\"steamvr\"][\"supersampleManualOverride\"] = True
-# Ensure async is disabled to match template
-data[\"steamvr\"][\"disableAsync\"] = True
+# Enable async features to reduce jitter
+data[\"steamvr\"][\"disableAsync\"] = False
 # Prevent SteamVR from capping resolution based on GPU speed
 data[\"steamvr\"][\"maxRecommendedResolution\"] = 4096
 # Enable motion smoothing to reduce jitter
