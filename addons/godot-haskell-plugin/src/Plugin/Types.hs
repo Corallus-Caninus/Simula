@@ -1653,7 +1653,8 @@ rotateWorkspaceHorizontally gss radians rotationMethod = do
         updateDiffMap gss currentWorkspace currentWorkspaceTransform
       Workspaces -> do
         G.rotate gss rotationAxisY radians
-        updateDiffMap gss (safeCast gss) currentWorkspaceTransform
+        gssTransform <- G.get_transform gss
+        updateDiffMap gss (safeCast gss) gssTransform
 
   -- update new diff map
   return ()
@@ -1675,9 +1676,11 @@ rotateWorkspaceVertically gss radians rotationMethod = do
         updateDiffMap gss currentWorkspace currentWorkspaceTransform
       Workspaces -> do
         G.rotate gss rotationAxisX radians
-        updateDiffMap gss (safeCast gss) currentWorkspaceTransform
+        gssTransform <- G.get_transform gss
+        updateDiffMap gss (safeCast gss) gssTransform
 
   -- update new diff map
+  return ()
   return ()
 
 queueFreeNodeAndChildren :: GodotNode -> IO ()

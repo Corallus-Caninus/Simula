@@ -152,14 +152,14 @@ getKeyboardAction gss keyboardShortcut =
     "sendToWorkspace8" -> sendToWorkspace gss 8
     "sendToWorkspace9" -> sendToWorkspace gss 9
     "sendToWorkspacePersistent" -> sendToWorkspace gss 0
-    "rotateWorkspaceHorizontallyLeft" -> rotateWorkspaceHorizontally gss (0.15707963)
-    "rotateWorkspaceHorizontallyRight" -> rotateWorkspaceHorizontally gss (-0.15707963)
-    "rotateWorkspacesHorizontallyLeft" -> rotateWorkspacesHorizontally gss (0.15707963)
-    "rotateWorkspacesHorizontallyRight" -> rotateWorkspacesHorizontally gss (-0.15707963)
-    "rotateWorkspaceVerticallyUp" -> rotateWorkspaceVertically gss (0.15707963)
-    "rotateWorkspaceVerticallyDown" -> rotateWorkspaceVertically gss (-0.15707963)
-    "rotateWorkspacesVerticallyUp" -> rotateWorkspacesVertically gss (0.15707963)
-    "rotateWorkspacesVerticallyDown" -> rotateWorkspacesVertically gss (-0.15707963)
+    "rotateWorkspaceHorizontallyLeft" -> rotateWorkspaceHorizontally gss (-0.15707963)
+    "rotateWorkspaceHorizontallyRight" -> rotateWorkspaceHorizontally gss (0.15707963)
+    "rotateWorkspacesHorizontallyLeft" -> rotateWorkspacesHorizontally gss (-0.15707963)
+    "rotateWorkspacesHorizontallyRight" -> rotateWorkspacesHorizontally gss (0.15707963)
+    "rotateWorkspaceVerticallyUp" -> rotateWorkspaceVertically gss (-0.15707963)
+    "rotateWorkspaceVerticallyDown" -> rotateWorkspaceVertically gss (0.15707963)
+    "rotateWorkspacesVerticallyUp" -> rotateWorkspacesVertically gss (-0.15707963)
+    "rotateWorkspacesVerticallyDown" -> rotateWorkspacesVertically gss (0.15707963)
     "toggleARMode" -> toggleARMode gss
     "toggleWasdMode" -> toggleWasdMode gss
     "addLeapMotion" -> addLeapMotion gss
