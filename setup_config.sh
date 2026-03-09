@@ -88,8 +88,10 @@ except Exception as e:
     exit(1)
 if \"steamvr\" not in data:
     data[\"steamvr\"] = {}
-# Force 2.0 resolution scale for a bit of extra supersampling
-data[\"steamvr\"][\"renderTargetScale\"] = 2.0
+# Force 1.3 resolution scale (a moderate increase for clarity)
+data[\"steamvr\"][\"renderTargetScale\"] = 1.3
+# Ensure the manual scale override is enabled
+data[\"steamvr\"][\"supersampleManualOverride\"] = True
 # Ensure async is disabled to match template
 data[\"steamvr\"][\"disableAsync\"] = True
 # Prevent SteamVR from capping resolution based on GPU speed
@@ -100,8 +102,8 @@ data[\"steamvr\"][\"enableMotionSmoothing\"] = False
 if \"GpuSpeed\" in data:
     if \"gpuSpeedRenderTargetScale\" in data[\"GpuSpeed\"]:
         print(f\"  - Current gpuSpeedRenderTargetScale: {data['GpuSpeed']['gpuSpeedRenderTargetScale']}\")
-        data[\"GpuSpeed\"][\"gpuSpeedRenderTargetScale\"] = 2.0
-        print(\"  - Set gpuSpeedRenderTargetScale to 2.0\")
+        data[\"GpuSpeed\"][\"gpuSpeedRenderTargetScale\"] = 1.3
+        print(\"  - Set gpuSpeedRenderTargetScale to 1.3\")
 try:
     with open(path, \"w\") as f:
         json.dump(data, f, indent=3)

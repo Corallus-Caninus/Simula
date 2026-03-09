@@ -66,10 +66,11 @@ move_down={
 
 [physics]
 
-common/physics_fps=90
+common/physics_fps=72
 2d/thread_model=2
 
 [rendering]
 
-quality/filters/anisotropic_filter_level=0
+quality/filters/msaa=2
+quality/filters/anisotropic_filter_level=16
 environment/default_environment="res://default_env.tres"

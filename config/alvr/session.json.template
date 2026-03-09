@@ -81,7 +81,7 @@
       "gui_collapsed": false,
       "adapter_index": 0,
       "transcoding_view_resolution": {
-        "Scale": 1.8,
+        "Scale": 1.3,
         "Absolute": {
           "width": 2064,
           "height": {
@@ -92,7 +92,7 @@
         "variant": "Scale"
       },
       "emulated_headset_view_resolution": {
-        "Scale": 2.0,
+        "Scale": 1.3,
         "Absolute": {
           "width": 3096,
           "height": {
