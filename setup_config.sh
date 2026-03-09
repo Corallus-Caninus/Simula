@@ -96,8 +96,8 @@ data[\"steamvr\"][\"supersampleManualOverride\"] = True
 data[\"steamvr\"][\"disableAsync\"] = True
 # Prevent SteamVR from capping resolution based on GPU speed
 data[\"steamvr\"][\"maxRecommendedResolution\"] = 4096
-# Disable motion smoothing which can cause issues with ALVR/Simula
-data[\"steamvr\"][\"enableMotionSmoothing\"] = False
+# Enable motion smoothing to reduce jitter
+data[\"steamvr\"][\"enableMotionSmoothing\"] = True
 # Remove GPU-speed-based overrides if they exist
 if \"GpuSpeed\" in data:
     if \"gpuSpeedRenderTargetScale\" in data[\"GpuSpeed\"]:
