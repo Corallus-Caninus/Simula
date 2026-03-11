@@ -32,8 +32,8 @@
     "enable_foveated_encoding": true,
     "foveation_center_size_x": 0.59999996,
     "foveation_center_size_y": 0.59999996,
-    "foveation_center_shift_x": 0.49999997,
-    "foveation_center_shift_y": 0.49999997,
+    "foveation_center_shift_x": 0.0,
+    "foveation_center_shift_y": 0.0,
     "foveation_edge_ratio_x": 3.0,
     "foveation_edge_ratio_y": 3.0,
     "enable_color_correction": false,
@@ -262,8 +262,8 @@
           "gui_collapsed": false,
           "center_size_x": 0.59999996,
           "center_size_y": 0.59999996,
-          "center_shift_x": 0.49999997,
-          "center_shift_y": 0.49999997,
+          "center_shift_x": 0.0,
+          "center_shift_y": 0.0,
           "edge_ratio_x": 3.0,
           "edge_ratio_y": 3.0
         }
