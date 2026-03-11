@@ -34,8 +34,8 @@
     "foveation_center_size_y": 0.59999996,
     "foveation_center_shift_x": 0.0,
     "foveation_center_shift_y": 0.0,
-    "foveation_edge_ratio_x": 3.0,
-    "foveation_edge_ratio_y": 3.0,
+    "foveation_edge_ratio_x": 2.0,
+    "foveation_edge_ratio_y": 2.0,
     "enable_color_correction": false,
     "brightness": 0.0,
     "contrast": 0.0,
@@ -103,7 +103,7 @@
         "variant": "Scale"
       },
       "preferred_fps": 72.0,
-      "max_buffering_frames": 1.0,
+      "max_buffering_frames": 3.0,
       "buffering_history_weight": 0.9,
       "optimize_game_render_latency": false,
       "bitrate": {
@@ -264,12 +264,12 @@
           "center_size_y": 0.59999996,
           "center_shift_x": 0.0,
           "center_shift_y": 0.0,
-          "edge_ratio_x": 3.0,
-          "edge_ratio_y": 3.0
+          "edge_ratio_x": 2.0,
+          "edge_ratio_y": 2.0
         }
       },
       "clientside_foveation": {
-        "enabled": true,
+        "enabled": false,
         "content": {
           "gui_collapsed": false,
           "mode": {
