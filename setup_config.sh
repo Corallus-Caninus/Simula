@@ -98,12 +98,6 @@ data[\"steamvr\"][\"disableAsync\"] = False
 data[\"steamvr\"][\"maxRecommendedResolution\"] = 4096
 # Enable motion smoothing to reduce jitter
 data[\"steamvr\"][\"enableMotionSmoothing\"] = True
-# Remove GPU-speed-based overrides if they exist
-if \"GpuSpeed\" in data:
-    if \"gpuSpeedRenderTargetScale\" in data[\"GpuSpeed\"]:
-        print(f\"  - Current gpuSpeedRenderTargetScale: {data['GpuSpeed']['gpuSpeedRenderTargetScale']}\")
-        data[\"GpuSpeed\"][\"gpuSpeedRenderTargetScale\"] = 1.3
-        print(\"  - Set gpuSpeedRenderTargetScale to 1.3\")
 try:
     with open(path, \"w\") as f:
         json.dump(data, f, indent=3)
