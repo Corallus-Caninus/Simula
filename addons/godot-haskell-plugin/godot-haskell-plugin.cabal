@@ -97,6 +97,7 @@ library
       Plugin.CanvasAR
       Plugin.LeapMotion
       Plugin.Input.HandTelekinesis
+      Plugin.TerminalState
       -- Debug.C
       -- Debug.Marshal
   default-language: Haskell2010
@@ -111,7 +112,7 @@ library
       TypeOperators
       MultiParamTypeClasses
       FunctionalDependencies
-  ghc-options: -fno-warn-unused-do-bind -fwarn-incomplete-uni-patterns -fwarn-incomplete-record-updates -fobject-code -g2 -threaded
+  ghc-options: -fno-warn-unused-do-bind -fwarn-incomplete-uni-patterns -fwarn-incomplete-record-updates -fobject-code -g2 -threaded -fprof-auto -rtsopts
  
 -- | After adding hsroots, we are forced to copy cabal fields for `library`
 -- down to `foreign-library godot-haskell-plugin` (unclear why).
@@ -145,10 +146,11 @@ foreign-library godot-haskell-plugin
     Plugin.CanvasAR
     Plugin.LeapMotion
     Plugin.Input.HandTelekinesis
+    Plugin.TerminalState
     -- Debug.C
     -- Debug.Marshal
   other-modules: FLib
-  ghc-options: -fno-warn-unused-do-bind -fwarn-incomplete-uni-patterns -fwarn-incomplete-record-updates -fobject-code -g2 -threaded
+  ghc-options: -fno-warn-unused-do-bind -fwarn-incomplete-uni-patterns -fwarn-incomplete-record-updates -fobject-code -g2 -threaded -fprof-auto -rtsopts
   build-depends:
       base
     , lens

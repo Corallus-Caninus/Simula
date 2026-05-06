@@ -6,11 +6,12 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Plugin.SimulaViewSprite where
 
 import Data.Text
-import Control.Exception
+import Control.Exception (catch, SomeException)
 import Data.Proxy
 
 import Data.Colour
@@ -123,21 +124,46 @@ updateSimulaViewSprite gsvs = do
       simulaView <- readTVarIO (gsvs ^. gsvsView) --
       let eitherSurface = (simulaView ^. svWlrEitherSurface)
       gss <- readTVarIO (gsvs ^. gsvsServer)
-      pid <- case eitherSurface of
-                  Left wlrXdgSurface -> do
-                    wlrXdgSurface <- validateSurfaceE wlrXdgSurface
-                    pidInt <- G.get_pid wlrXdgSurface
-                    return $ (fromInteger $ fromIntegral pidInt)
-                  Right wlrXWaylandSurface -> do
-                    wlrXWaylandSurface <- validateSurfaceE wlrXWaylandSurface
-                    pidInt <- G.get_pid wlrXWaylandSurface
-                    return $ (fromInteger $ fromIntegral pidInt)
-      pids <- (pid:) <$> getParentsPids pid
-      maybeLocation <- getSimulaStartingLocationAtomically gss pids
-      case maybeLocation of
-        Just location -> moveToStartingPosition gsvs location
-        Nothing -> return ()
-      atomically $ writeTVar (_gsvsShouldMove gsvs) False
+      
+      maybeRestorePos <- atomically $ do
+        pending <- readTVar (gss ^. gssPendingRestores)
+        case pending of
+          (pos:rest) -> do
+            writeTVar (gss ^. gssPendingRestores) rest
+            return (Just pos)
+          [] -> return Nothing
+      
+      case maybeRestorePos of
+        Just restorePos -> do
+          logPutStrLn $ "Applying restore position: " ++ show restorePos
+          meshInstance <- atomically $ readTVar (gsvs ^. gsvsMeshInstance)
+          aabb <- G.get_aabb meshInstance
+          size <- godot_aabb_get_size aabb
+          sizeV3 <- fromLowLevel size
+          let halfSize = sizeV3 ^/ 2
+          let restorePosFloat = fmap realToFrac restorePos
+          let finalPos = restorePosFloat ^+^ V3 0 (halfSize ^. _y) 0
+          transform <- G.get_global_transform gsvs >>= fromLowLevel
+          let (TF basis _) = transform
+          newTransform <- toLowLevel (TF basis finalPos)
+          G.set_global_transform gsvs newTransform
+          atomically $ writeTVar (_gsvsShouldMove gsvs) False
+        Nothing -> do
+          pid <- case eitherSurface of
+                      Left wlrXdgSurface -> do
+                        wlrXdgSurface <- validateSurfaceE wlrXdgSurface
+                        pidInt <- G.get_pid wlrXdgSurface
+                        return $ (fromInteger $ fromIntegral pidInt)
+                      Right wlrXWaylandSurface -> do
+                        wlrXWaylandSurface <- validateSurfaceE wlrXWaylandSurface
+                        pidInt <- G.get_pid wlrXWaylandSurface
+                        return $ (fromInteger $ fromIntegral pidInt)
+          pids <- (pid:) <$> getParentsPids pid
+          maybeLocation <- getSimulaStartingLocationAtomically gss pids
+          case maybeLocation of
+            Just location -> moveToStartingPosition gsvs location
+            Nothing -> return ()
+          atomically $ writeTVar (_gsvsShouldMove gsvs) False
   where -- Necessary for window manipulation to function
         setBoxShapeExtentsToMatchAABB :: GodotSimulaViewSprite -> IO ()
         setBoxShapeExtentsToMatchAABB gsvs = do
@@ -500,7 +526,9 @@ _handle_map gsvs _ = do
 
   G.set_process gsvs True
   G.set_process_input gsvs True
-  atomically $ modifyTVar' (_gssViews gss) (M.insert simulaView gsvs) -- TVar (M.Map SimulaView GodotSimulaViewSprite)
+  viewsOld <- readTVarIO (_gssViews gss)
+  let !newViews = M.insert simulaView gsvs viewsOld
+  atomically $ writeTVar (_gssViews gss) newViews
   atomically $ writeTVar (_gsvsShouldMove gsvs) True
 
   putStr "Mapping surface "
@@ -550,7 +578,9 @@ _process self _ = do
     (False, True) -> do
       isAtTargetDimsNow <- isAtTargetDimensions self
       if isAtTargetDimsNow then (atomically $ writeTVar (self ^. gsvsIsAtTargetDims) True) else (return ())
-    (True, True) -> updateSimulaViewSprite self
+    (True, True) -> do
+      updateSimulaViewSprite self
+      updateTmuxSessionPosition self
     _ -> return ()
   return ()
   where isAtTargetDimensions :: GodotSimulaViewSprite -> IO Bool
@@ -618,10 +648,25 @@ _handle_destroy gsvs [gsvsGV] = do
                                   False -> return ()
     Nothing -> return ()
 
-  G.queue_free gsvs -- Queue the `gsvs` for destruction
-  G.set_process gsvs False -- Remove the `simulaView ↦ gsvs` mapping from the gss
-  atomically $ modifyTVar' (gss ^. gssViews) (M.delete simulaView)
-  deleteSurface eitherSurface -- Causing issues with rr
+  G.set_process gsvs False
+  -- Immediately remove from workspace to prevent double-parenting
+  (workspace, _) <- readTVarIO (gss ^. gssWorkspace)
+  isChild <- G.is_a_parent_of ((safeCast workspace) :: GodotNode) ((safeCast gsvs) :: GodotNode)
+  when isChild $ G.remove_child ((safeCast workspace) :: GodotNode) ((safeCast gsvs) :: GodotNode)
+  _ <- (do
+    cb <- readTVarIO (gsvs ^. gsvsCanvasBase)
+    cs <- readTVarIO (gsvs ^. gsvsCanvasSurface)
+    viewportBase <- readTVarIO (cb ^. cbViewport)
+    viewportSurface <- readTVarIO (cs ^. csViewport)
+    G.set_process viewportBase False
+    G.set_process viewportSurface False
+    G.queue_free viewportBase
+    G.queue_free viewportSurface) `catch` (\(_ :: SomeException) -> return ())
+  G.queue_free gsvs
+  viewsOld <- readTVarIO (gss ^. gssViews)
+  let !newViews = M.delete simulaView viewsOld
+  atomically $ writeTVar (gss ^. gssViews) newViews
+  deleteSurface eitherSurface
 
   where
     deleteSurface eitherSurface = do

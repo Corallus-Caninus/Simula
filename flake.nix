@@ -31,6 +31,7 @@
         let
           godot-haskell = inputs.godot-haskell.packages."${system}".godot-haskell;
           godot-haskell-plugin = pkgs.callPackage ./addons/godot-haskell-plugin { inherit godot-haskell; };
+          godot-haskell-plugin-profiled = pkgs.callPackage ./addons/godot-haskell-plugin { inherit godot-haskell; profileBuild = true; };
 
           # `haskell-dependencies` contains shared libraries
           # This attribute is needed to pick up `${any-package}/lib/ghc-9.6.5/lib/x86_64-linux-ghc-9.6.5/*.so` for `pkgs.autoPatchelfHook`
@@ -193,7 +194,10 @@
                   pkgs.xwayland
                   pkgs.xpra
                   pkgs.xfce.xfce4-terminal
+                  pkgs.foot
+                  pkgs.sakura
                   pkgs.kitty
+                  pkgs.tmux
                   pkgs.xterm
                   pkgs.xorg.xrdb
                   pkgs.xorg.setxkbmap
@@ -224,9 +228,30 @@
               export SIMULA_CONFIG_DIR="$XDG_CONFIG_HOME/Simula"
               export SIMULA_APP_DIR="'$out'/bin"
 
+              # Set high priority for Simula and its children
+              if command -v sudo >/dev/null 2>&1 && command -v renice >/dev/null 2>&1; then
+                  sudo renice -n -20 -p $$ >/dev/null 2>&1 || true                  # Also set priority for SteamVR and ALVR processes if they exist
+                  sudo renice -n -20 -p $(pgrep vrserver) 2>/dev/null || true
+                  sudo renice -n -20 -p $(pgrep vrcompositor) 2>/dev/null || true
+                  sudo renice -n -20 -p $(pgrep alvr) 2>/dev/null || true
+              fi
+
+              # Note: Network priority is not set by this script. Configure separately if needed.
+
+              # Detect active X11 display
+              export DISPLAY="''${DISPLAY:-:0}"
+
+              # Verify SteamVR runtime exists
+              XR_RUNTIME_JSON_CANDIDATE="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
+              if [ -f "$XR_RUNTIME_JSON_CANDIDATE" ]; then
+                  export XR_RUNTIME_JSON="$XR_RUNTIME_JSON_CANDIDATE"
+              else
+                  echo "Warning: SteamVR runtime not found at $XR_RUNTIME_JSON_CANDIDATE"
+                  echo "VR headset may not be detected."
+              fi
+
               if grep -qi NixOS /etc/os-release; then
                   echo "NixOS detected. Running Simula..."
-                  export XR_RUNTIME_JSON="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
                   export XKB_DEFAULT_LAYOUT="us"
                   export XKB_DEFAULT_VARIANT=""
                   export XKB_DEFAULT_OPTIONS=""
@@ -242,7 +267,10 @@
               mkdir -p $out/bin
               ln -s ${pkgs.xpra}/bin/xpra $out/bin/xpra
               ln -s ${pkgs.xfce.xfce4-terminal}/bin/xfce4-terminal $out/bin/xfce4-terminal
+              ln -s ${pkgs.foot}/bin/foot $out/bin/foot
+              ln -s ${pkgs.sakura}/bin/sakura $out/bin/sakura
               ln -s ${pkgs.kitty}/bin/kitty $out/bin/kitty
+              ln -s ${pkgs.tmux}/bin/tmux $out/bin/tmux
               ln -s ${pkgs.xterm}/bin/xterm $out/bin/xterm
               ln -s ${pkgs.xorg.xrdb}/bin/xrdb $out/bin/xrdb
               ln -s ${pkgs.wmctrl}/bin/wmctrl $out/bin/wmctrl
@@ -287,6 +315,170 @@
           packages = {
             inherit simula godot-haskell-plugin;
             default = simula;
+
+            simula-debug = let
+              godot-haskell-plugin' = godot-haskell-plugin-profiled;
+            in pkgs.stdenv.mkDerivation rec {
+              pname = "simula-debug";
+              version = "0.0.0-debug";
+
+              nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.makeWrapper ];
+
+              buildInputs = [
+                haskell-dependencies
+                "${godot-haskell-plugin'}/lib/ghc-9.6.5/lib"
+                "${godot-haskell-plugin'}/lib/ghc-9.6.5/lib/x86_64-linux-ghc-9.6.5"
+                "${haskell-dependencies}/lib"
+                inputs.godot.packages."${system}".godot
+                pkgs.systemd
+                pkgs.openxr-loader
+                pkgs.libuuid
+                pkgs.libGL
+                pkgs.libvdpau
+                pkgs.libglvnd
+                pkgs.xorg.libxcb
+                pkgs.xorg.libXau
+                pkgs.xorg.libXdmcp
+                pkgs.xorg.libXmu
+                pkgs.xorg.libSM
+                pkgs.xorg.libICE
+                pkgs.glib
+                pkgs.mesa
+                pkgs.libepoxy
+                pkgs.vulkan-loader
+                pkgs.xorg.libXres
+                pkgs.xorg.libXrender
+                pkgs.xorg.libXcomposite
+                pkgs.xorg.libXcursor
+                pkgs.xorg.libXdamage
+                pkgs.xorg.libXi
+                pkgs.xorg.libXtst
+                pkgs.fira-code
+              ];
+
+              dontUnpack = true;
+
+              installPhase = ''
+                runHook preInstall
+
+                mkdir -p $out/opt/simula
+                cp -a ${simula-src}/. $out/opt/simula/
+                chmod -R +w $out/opt/simula
+
+                cp -v ${godot-haskell-plugin'}/lib/ghc-9.6.5/lib/libgodot-haskell-plugin.so $out/opt/simula/addons/godot-haskell-plugin/bin/x11/libgodot-haskell-plugin.so
+                chmod 755 $out/opt/simula/addons/godot-haskell-plugin/bin/x11/libgodot-haskell-plugin.so
+
+                addAutoPatchelfSearchPath ${haskell-dependencies}/lib
+                addAutoPatchelfSearchPath ${godot-haskell-plugin'}/lib/ghc-9.6.5/lib
+                addAutoPatchelfSearchPath ${godot-haskell-plugin'}/lib/ghc-9.6.5/lib/x86_64-linux-ghc-9.6.5
+                
+                autoPatchelf $out/opt/simula
+
+                mkdir -p $out/bin
+                echo '#!/usr/bin/env sh
+
+                set -o errexit
+                set -o nounset
+                set -o pipefail
+
+                export PATH="${
+                  lib.makeBinPath [
+                    inputs.godot.packages."${system}".godot
+                    pkgs.xwayland
+                    pkgs.xpra
+                    pkgs.xfce.xfce4-terminal
+                  pkgs.foot
+                  pkgs.sakura
+                  pkgs.tmux
+                    pkgs.xterm
+                    pkgs.xorg.xrdb
+                    pkgs.xorg.setxkbmap
+                    pkgs.wmctrl
+                    pkgs.ffmpeg
+                    pkgs.midori
+                    pkgs.synapse
+                    pkgs.xsel
+                    pkgs.mimic
+                    pkgs.xclip
+                    pkgs.curl
+                    pkgs.i3status
+                    pkgs.procps
+                    pkgs.bottom
+                    pkgs.steam-run
+                    pkgs.fira-code
+                  ]
+                }:$PATH"
+
+                export LD_LIBRARY_PATH="${lib.makeLibraryPath buildInputs}"
+
+                export XDG_CACHE_HOME=''${XDG_CACHE_HOME:-$HOME/.cache}
+                export XDG_DATA_HOME=''${XDG_DATA_HOME:-$HOME/.local/share}
+                export XDG_CONFIG_HOME=''${XDG_CONFIG_HOME:-$HOME/.config}
+
+                export SIMULA_LOG_DIR="$XDG_CACHE_HOME/Simula"
+                export SIMULA_DATA_DIR="$XDG_DATA_HOME/Simula"
+                export SIMULA_CONFIG_DIR="$XDG_CONFIG_HOME/Simula"
+                export SIMULA_APP_DIR="'$out'/bin"
+
+                # RTS flags for profiling - override via GHCRTS env var
+                export GHCRTS="''${GHCRTS:--hT -sstderr}"
+
+                export DISPLAY="''${DISPLAY:-:0}"
+
+                XR_RUNTIME_JSON_CANDIDATE="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
+                if [ -f "$XR_RUNTIME_JSON_CANDIDATE" ]; then
+                    export XR_RUNTIME_JSON="$XR_RUNTIME_JSON_CANDIDATE"
+                else
+                    echo "Warning: SteamVR runtime not found at $XR_RUNTIME_JSON_CANDIDATE"
+                fi
+
+                if grep -qi NixOS /etc/os-release; then
+                    echo "NixOS detected. Running Simula (DEBUG/PROFILING mode)..."
+                    export XKB_DEFAULT_LAYOUT="us"
+                    export XKB_DEFAULT_VARIANT=""
+                    export XKB_DEFAULT_OPTIONS=""
+                    export XKB_CONFIG_ROOT="${pkgs.xorg.xkeyboardconfig}/share/X11/xkb"
+                    godot -m "'$out'"/opt/simula/project.godot
+                else
+                  echo "Detects non-NixOS distribution. Running Simula with nixGL..."
+                  nix run --impure github:nix-community/nixGL -- godot -m "'$out'"/opt/simula/project.godot
+                fi' > $out/bin/simula-debug
+                chmod 755 $out/bin/simula-debug
+
+                ln -s ${pkgs.xpra}/bin/xpra $out/bin/xpra
+                ln -s ${pkgs.xfce.xfce4-terminal}/bin/xfce4-terminal $out/bin/xfce4-terminal
+                ln -s ${pkgs.foot}/bin/foot $out/bin/foot
+                ln -s ${pkgs.sakura}/bin/sakura $out/bin/sakura
+                ln -s ${pkgs.kitty}/bin/kitty $out/bin/kitty
+                ln -s ${pkgs.tmux}/bin/tmux $out/bin/tmux
+                ln -s ${pkgs.xterm}/bin/xterm $out/bin/xterm
+                ln -s ${pkgs.xorg.xrdb}/bin/xrdb $out/bin/xrdb
+                ln -s ${pkgs.wmctrl}/bin/wmctrl $out/bin/wmctrl
+                ln -s ${pkgs.i3status}/bin/i3status $out/bin/i3status
+                ln -s ${pkgs.ffmpeg-full}/bin/ffplay $out/bin/ffplay
+                ln -s ${pkgs.ffmpeg-full}/bin/ffmpeg $out/bin/ffmpeg
+                ln -s ${pkgs.midori}/bin/midori $out/bin/midori
+                ln -s ${pkgs.synapse}/bin/synapse $out/bin/synapse
+                ln -s ${pkgs.xsel}/bin/xsel $out/bin/xsel
+                ln -s ${pkgs.mimic}/bin/mimic $out/bin/mimic
+                ln -s ${pkgs.xclip}/bin/xclip $out/bin/xclip
+                ln -s ${pkgs.patchelf}/bin/patchelf $out/bin/patchelf
+                ln -s ${pkgs.dialog}/bin/dialog $out/bin/dialog
+                ln -s ${pkgs.curl}/bin/curl $out/bin/curl
+
+                cp -v ${simula-src}/.Xdefaults $out/.Xdefaults || true
+                cp -rv ${simula-src}/config $out/config || true
+
+                runHook postInstall
+              '';
+
+              meta = {
+                mainProgram = "simula-debug";
+                homepage = "https://github.com/SimulaVR/Simula";
+                license = lib.licenses.mit;
+                platforms = lib.platforms.linux;
+              };
+            };
           };
 
           devShells.default = pkgs.mkShell rec {

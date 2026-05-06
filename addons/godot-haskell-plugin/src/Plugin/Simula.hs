@@ -130,16 +130,15 @@ ready self _ = do
   --   tex.create_from_image(img)
   getTextureFromURL :: String -> IO (GodotTexture)
   getTextureFromURL urlStr = do
-    -- instance new types
     godotImage <- unsafeInstance GodotImage "Image" :: IO GodotImage
     godotImageTexture <- unsafeInstance GodotImageTexture "ImageTexture"
 
-    -- Get image from URL
     pngUrl <- toLowLevel (pack urlStr) :: IO GodotString
-    exitCode <- G.load godotImageTexture pngUrl -- load :: GodotImageTexture -> GodotString -> IO Int
-    -- Load image into texture
+    exitCode <- G.load godotImageTexture pngUrl
     G.create_from_image godotImageTexture godotImage G.TEXTURE_FLAGS_DEFAULT
-    return (safeCast godotImageTexture) -- NOTE: This [probably] leaks godotImage?
+    Api.godot_string_destroy pngUrl
+    Api.godot_object_destroy $ safeCast godotImage
+    return (safeCast godotImageTexture)
 
 
   addSimulaServerNode :: IO GodotSpatial

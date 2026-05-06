@@ -9,6 +9,7 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Plugin.SimulaServer where
 
@@ -47,6 +48,7 @@ import Plugin.Input
 import Plugin.SimulaViewSprite
 import Plugin.Types
 import Plugin.Debug
+import Plugin.TerminalState
 
 import Control.Monad
 import Control.Concurrent
@@ -99,7 +101,7 @@ getKeyboardAction gss keyboardShortcut =
     "clickRight" -> rightClick
     "scrollUp" -> scrollUp gss
     "scrollDown" -> scrollDown gss
-    "launchTerminal" -> \_ isPressed -> when isPressed $ (terminalLaunch gss (Just "center") >> return ())
+    "launchTerminal" -> \_ isPressed -> when isPressed $ (terminalLaunch gss (Just "center") Nothing >> return ())
     "launchXrpa" -> launchXpra' gss
     "toggleGrabMode" -> toggleGrabMode'
     "launchHMDWebCam" -> launchHMDWebCam' gss
@@ -410,7 +412,8 @@ getKeyboardAction gss keyboardShortcut =
         decreaseTransparency (Just (gsvs, coords@(SurfaceLocalCoordinates (sx, sy)))) True = do
           transOld <- readTVarIO (gsvs ^. gsvsTransparency)
           let transNew = (constrainTransparency (transOld - 0.05))
-          atomically $ writeTVar (gsvs ^. gsvsTransparency) transNew
+          let !transNew' = transNew
+          atomically $ writeTVar (gsvs ^. gsvsTransparency) transNew'
           case (transOld == 1, transNew == 1) of
             (True, False) -> setShader gsvs "res://addons/godot-haskell-plugin/TextShader.tres"
             (False, True)-> setShader gsvs "res://addons/godot-haskell-plugin/TextShaderOpaque.tres"
@@ -421,7 +424,8 @@ getKeyboardAction gss keyboardShortcut =
         increaseTransparency (Just (gsvs, coords@(SurfaceLocalCoordinates (sx, sy)))) True = do
           transOld <- readTVarIO (gsvs ^. gsvsTransparency)
           let transNew = (constrainTransparency (transOld + 0.05))
-          atomically $ writeTVar (gsvs ^. gsvsTransparency) transNew
+          let !transNew' = transNew
+          atomically $ writeTVar (gsvs ^. gsvsTransparency) transNew'
           case (transOld == 1, transNew == 1) of
             (True, False) -> setShader gsvs "res://addons/godot-haskell-plugin/TextShader.tres"
             (False, True)-> setShader gsvs "res://addons/godot-haskell-plugin/TextShaderOpaque.tres"
@@ -433,7 +437,8 @@ getKeyboardAction gss keyboardShortcut =
           screenshotMode <- readTVarIO (gsvs ^. gsvsScreenshotMode)
           case screenshotMode of
             True -> do atomically $ writeTVar (gsvs ^. gsvsScreenshotMode) False
-                       atomically $ writeTVar (gsvs ^. gsvsScreenshotCoords) (Nothing, Nothing)
+                       let !coords' = (Nothing, Nothing)
+                       atomically $ writeTVar (gsvs ^. gsvsScreenshotCoords) coords'
 
             False -> do atomically $ writeTVar (gsvs ^. gsvsScreenshotMode) True
         toggleScreenshotMode _ _ = return ()
@@ -482,11 +487,25 @@ getKeyboardAction gss keyboardShortcut =
 
         terminateSimula :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         terminateSimula gss _ True = do
+          logPutStrLn "Saving terminal state..."
+          saveAndExportTerminalState gss
           logPutStrLn "Terminating Simula.."
           sceneTree <- G.get_tree gss
           G.quit sceneTree (-1)
           return ()
         terminateSimula _ _ _ = return ()
+
+        saveAndExportTerminalState :: GodotSimulaServer -> IO ()
+        saveAndExportTerminalState gss = do
+          tmuxMap <- atomically $ readTVar (gss ^. gssTmuxSessionMap)
+          currentTime <- Data.Time.Clock.getCurrentTime
+          let terminalState = TerminalState
+                { _tsSessions = M.elems tmuxMap
+                , _tsLastClosed = currentTime
+                }
+          saveTerminalState terminalState
+          exportTerminalsToDesktop terminalState
+          atomically $ writeTVar (gss ^. gssDesktopExported) True
 
         cycleEnvironment :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         cycleEnvironment gss _ True = do
@@ -743,7 +762,8 @@ process gss [deltaGV] = do
         G.pop rtLabelW
         return ()
     G.pop rtLabelW
-    atomically $ modifyTVar (gss ^. gssHUD) (\h -> h { _hudLastWorkspaceStatus = workspaceStatus })
+    let !workspaceStatus' = workspaceStatus
+    atomically $ modifyTVar' (gss ^. gssHUD) (\h -> h { _hudLastWorkspaceStatus = workspaceStatus' })
 
   -- Update i3status HUD if changed
   when (i3status /= (hud ^. hudLastI3Status)) $ do
@@ -756,23 +776,24 @@ process gss [deltaGV] = do
     G.append_bbcode rtLabel `withGodotString` (pack i3status)
     G.pop rtLabel
     G.pop rtLabel
-    atomically $ modifyTVar (gss ^. gssHUD) (\h -> h { _hudLastI3Status = i3status })
+    let !i3status' = i3status
+    atomically $ modifyTVar' (gss ^. gssHUD) (\h -> h { _hudLastI3Status = i3status' })
   -- logPutStrLn "SimulaServer.process end"
 
 ready :: GodotSimulaServer -> [GodotVariant] -> IO ()
 ready gss _ = do
-  logPutStrLn "!!!!!! SimulaServer.ready STARTING !!!!!!"
-  debugModeMaybe <- lookupEnv "DEBUG"
   rrModeMaybe <- lookupEnv "RUNNING_UNDER_RR"
   maybeLogDir <- lookupEnv "SIMULA_LOG_DIR"
   let logDir = fromMaybe "." maybeLogDir
-  -- Delete log file
+  -- Delete old log file
   case rrModeMaybe of
     Just "1" -> return ()
-    _ -> do logPutStrLn "Running Simula without RR"
-            readProcess "touch" [logDir ++ "/log.txt"] []
-            readProcess "rm" [logDir ++ "/log.txt"] []
+    _ -> do exists <- System.Directory.doesFileExist (logDir ++ "/log.txt")
+            when exists $ System.Directory.removeFile (logDir ++ "/log.txt")
             return ()
+  initLogPath
+  logPutStrLn "!!!!!! SimulaServer.ready STARTING !!!!!!"
+  debugModeMaybe <- lookupEnv "DEBUG"
 
   addWlrChildren gss
 
@@ -855,19 +876,40 @@ ready gss _ = do
 
   -- Launch default apps (with polling instead of threadDelay)
   sApps <- readTVarIO (gss ^. gssStartingApps)
-  _ <- forkIO $ do
-    let waitForXwayland 0 = logPutStrLn "XWayland never became ready, giving up on default apps."
-        waitForXwayland n = do
-          exists <- System.Directory.doesFileExist "/run/user/1000/simula-0"
-          if exists
-            then do
-              logPutStrLn "XWayland ready, launching default apps."
-              launchDefaultApps sApps "center"
-            else do
-              Control.Concurrent.yield
-              waitForXwayland (n - 1)
-    waitForXwayland 1000000 -- Poll many times since we yield instead of sleep
-  logPutStrLn $ "Queued default apps launch: " ++ (show sApps)
+  
+  maybeTerminalState <- loadTerminalState
+  case maybeTerminalState of
+    Just state -> do
+      logPutStrLn "Found saved terminal state, restoring sessions..."
+      _ <- forkIO $ do
+        let waitForXwayland 0 = logPutStrLn "XWayland never became ready, giving up on terminal restore."
+            waitForXwayland n = do
+              exists <- System.Directory.doesFileExist "/run/user/1000/simula-0"
+              if exists
+                then do
+                  logPutStrLn "XWayland ready, restoring terminal sessions."
+                  importTerminalsFromDesktop
+                  restoreTerminalSessions gss state
+                else do
+                  threadDelay 10000
+                  waitForXwayland (n - 1)
+        waitForXwayland 1000
+      logPutStrLn $ "Queued terminal restore"
+    Nothing -> do
+      logPutStrLn "No saved terminal state, will launch default apps"
+      _ <- forkIO $ do
+        let waitForXwayland 0 = logPutStrLn "XWayland never became ready, giving up on default apps."
+            waitForXwayland n = do
+              exists <- System.Directory.doesFileExist "/run/user/1000/simula-0"
+              if exists
+                then do
+                  logPutStrLn "XWayland ready, launching default apps."
+                  launchDefaultApps sApps "center"
+                else do
+                  threadDelay 10000
+                  waitForXwayland (n - 1)
+        waitForXwayland 1000
+      logPutStrLn $ "Queued default apps launch: " ++ (show sApps)
 
   case debugModeMaybe of
     Nothing -> return ()
@@ -1159,6 +1201,11 @@ initGodotSimulaServer obj = do
 
       gssGrab' <- newTVarIO Nothing
 
+      gssTerminalStateFile' <- newTVarIO "" :: IO (TVar FilePath)
+      gssTmuxSessionMap' <- newTVarIO M.empty :: IO (TVar (M.Map Int TmuxSessionInfo))
+      gssDesktopExported' <- newTVarIO False :: IO (TVar Bool)
+      gssPendingRestores' <- newTVarIO [] :: IO (TVar [V3 Double])
+
       gssWorkspaces' <- V.replicateM 10 (unsafeInstance GodotSpatial "Spatial")
       gssWorkspace' <- newTVarIO $ ((gssWorkspaces' V.! 1), "1")
       workspacePersistent <- (unsafeInstance GodotSpatial "Spatial")
@@ -1271,6 +1318,10 @@ initGodotSimulaServer obj = do
       , _gssLeapMotion            = gssLeapMotion'            :: TVar GodotLeapMotion
       , _gssDampSensitivity       = gssDampSensitivity'       :: TVar DampSensitivity
       , _gssKeyboardModifiersActive = gssKeyboardModifiersActive' :: TVar (Maybe Modifiers)
+      , _gssTerminalStateFile       = gssTerminalStateFile'       :: TVar FilePath
+      , _gssTmuxSessionMap          = gssTmuxSessionMap'          :: TVar (M.Map Int TmuxSessionInfo)
+      , _gssDesktopExported         = gssDesktopExported'         :: TVar Bool
+      , _gssPendingRestores         = gssPendingRestores'         :: TVar [V3 Double]
       }
   return gss
   where getStartingAppsStr :: Maybe String -> String
@@ -1593,14 +1644,14 @@ processKeypress gss modifiers keycode isPressed = do
         (Just remappedKeycode) -> remappedKeycode
         Nothing                -> keycode
 
-  logPutStrLn $ "modifiers: " ++ (show modifiers)
+  -- logPutStrLn $ "modifiers: " ++ (show modifiers)
   -- logPutStrLn $ "keycode': " ++ (show keycode')
 
   wasdMode <- readTVarIO (gss ^. gssWasdMode)
   let isMouseCode = isMouseButton keycode'
 
   case (maybeKeyboardAction, isMouseCode) of
-    (Just action, _) -> do logPutStrLn $ "action detected"
+    (Just action, _) -> do -- logPutStrLn $ "action detected"
                            action maybeHMDLookAtSprite isPressed
     (Nothing, False) -> case (isPressed, wasdMode) of
                              (False, False) -> do if (keycode' == keyNull) then return () else G.send_wlr_event_keyboard_key wlrKeyboard keycode' isPressed

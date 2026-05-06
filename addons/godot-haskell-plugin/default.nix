@@ -62,4 +62,5 @@ haskellPackages.mkDerivation {
   doHaddock = false;
   doCheck = false;
   enableLibraryProfiling = profileBuild;
+  enableExecutableProfiling = profileBuild;
 }

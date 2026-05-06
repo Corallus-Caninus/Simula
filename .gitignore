@@ -20,5 +20,9 @@ dist-newstyle
 # Nix's result
 result
 
+# Generated config files
+config/alvr/session.json
+config/HUD.config
+
 # nix-direnv
 .direnv/

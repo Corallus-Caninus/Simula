@@ -1,0 +1,40 @@
+NixOS detected. Running Simula...
+ERROR: Method failed. Returning: nullptr
+   at: bind_methodfi (core/class_db.cpp:1210)
+ERROR: Condition "!signal_is_valid" is true. Returned: ERR_INVALID_PARAMETER
+   at: connect (core/object.cpp:1462)
+Authorization required, but no authorization protocol specified
+
+Cannot open display.
+(WW) Option "-listen" for file descriptors is deprecated
+Please use "-listenfd" instead.
+(WW) Option "-listen" for file descriptors is deprecated
+Please use "-listenfd" instead.
+Could not start dynamically linked executable: /home/jward/.steam/steam/steamapps/common/SteamVR/bin/linux64/vrserver
+NixOS cannot run dynamically linked executables intended for generic
+linux environments out of the box. For more information, see:
+https://nix.dev/permalink/stub-ld
+Godot Engine v3.4.beta.custom_build - https://godotengine.org
+OpenGL ES 3.0 Renderer: NVIDIA GeForce GTX 1050 Ti/PCIe/SSE2
+OpenGL ES Batching: ON
+ 
+Running Wayland server on display simula-0
+Error [GENERAL | xrCreateInstance | OpenXR-Loader] : LoaderInstance::CreateInstance chained CreateInstance call failed
+Error [GENERAL | xrCreateInstance | OpenXR-Loader] : xrCreateInstance failed
+Error [GENERAL | xrResultToString | OpenXR-Loader] : No active XrInstance handle.
+ERROR: OpenXR Failed to create XR instance. []
+   at: xr_result (src/openxr/OpenXRApi.h:310)
+Xwayland glamor: GBM Wayland interfaces not available
+Failed to initialize glamor, falling back to sw
+The XKEYBOARD keymap compiler (xkbcomp) reports:
+> Warning:          Unsupported maximum keycode 708, clipping.
+>                   X11 cannot support keycodes above 255.
+> Warning:          Could not resolve keysym XF86KbdInputAssistPrevgrou
+> Warning:          Could not resolve keysym XF86KbdInputAssistNextgrou
+Errors from xkbcomp are not fatal to the X server
+ERROR: Condition "p_child->data.parent" is true.
+   at: add_child (scene/main/node.cpp:1131)
+ERROR: Condition "p_child->data.parent" is true.
+   at: add_child (scene/main/node.cpp:1131)
+XIO:  fatal IO error 0 (Success) on X server ":1"
+      after 533 requests (533 known processed) with 0 events remaining.

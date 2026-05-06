@@ -10,6 +10,8 @@
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module Plugin.Types where
 
@@ -19,15 +21,19 @@ import           Linear.V3
 import           Path.IO
 
 import           Data.Time.Clock
+import           Data.Time.Format.ISO8601
+import           Data.Time.Format
 import           Data.Maybe
 import qualified System.Posix.User
 import           Text.Read (readMaybe)
 import           System.Environment (lookupEnv)
 import           Control.Concurrent
+import           Control.Concurrent.STM (registerDelay)
 import           Control.Monad
 import           Data.Coerce
 import           Unsafe.Coerce
-import           Control.Exception.Safe
+import           Control.Exception hiding (try, throw)
+import           Control.Exception.Safe (try, throw)
 
 import           Data.Typeable
 import           Godot.Gdnative.Types
@@ -68,10 +74,14 @@ import Data.IORef
 import qualified Data.Map.Strict as M
 
 import Data.UUID
+import Data.UUID.V1 (nextUUID)
 import System.Process
 import System.Process.Internals
 import System.Posix.Types
 import GHC.IO.Handle
+import System.IO (openFile, IOMode(AppendMode), hSetBuffering, BufferMode(LineBuffering), hPutStrLn, hFlush)
+import System.Exit (ExitCode(..))
+import qualified Data.Aeson as Aeson
 
 import Godot.Core.GodotViewport as G
 
@@ -117,6 +127,16 @@ unfoldrM f b = f b >>= \case
 data SurfaceLocalCoordinates    = SurfaceLocalCoordinates (Float, Float)
 data SubSurfaceLocalCoordinates = SubSurfaceLocalCoordinates (Float, Float)
 data SpriteDimensions      = SpriteDimensions (Int, Int)
+  deriving (Show, Generic)
+
+instance Aeson.ToJSON SpriteDimensions where
+  toJSON (SpriteDimensions (w, h)) = Aeson.object [ "width" Aeson..= w, "height" Aeson..= h ]
+
+instance Aeson.FromJSON SpriteDimensions where
+  parseJSON = Aeson.withObject "SpriteDimensions" $ \v -> do
+    w <- v Aeson..: "width"
+    h <- v Aeson..: "height"
+    return $ SpriteDimensions (w, h)
 
 data ResizeMethod = Zoom | Horizontal | Vertical deriving (Eq)
 
@@ -192,10 +212,10 @@ data HUD = HUD
   , _hudRtlI3        :: GodotRichTextLabel
   , _hudSvrTexture   :: GodotTexture
   , _hudDynamicFont  :: GodotDynamicFont
-  , _hudI3Status     :: String
-  , _hudLastI3Status :: String
-  , _hudLastWorkspaceStatus :: String
-  , _hudMemoryUsage  :: Float
+  , _hudI3Status     :: !String
+  , _hudLastI3Status :: !String
+  , _hudLastWorkspaceStatus :: !String
+  , _hudMemoryUsage  :: !Float
   }
 
 data PhysicsBodyConfig = PhysicsBodyConfig
@@ -289,11 +309,15 @@ data GodotSimulaServer = GodotSimulaServer
   , _gssLeapMotion              :: TVar GodotLeapMotion
   , _gssDampSensitivity         :: TVar DampSensitivity
   , _gssKeyboardModifiersActive :: TVar (Maybe Modifiers)
+  , _gssTerminalStateFile       :: TVar FilePath
+  , _gssTmuxSessionMap          :: TVar (M.Map Int TmuxSessionInfo)
+  , _gssDesktopExported         :: TVar Bool
+  , _gssPendingRestores         :: TVar [V3 Double]
   }
 
 instance HasBaseClass GodotSimulaServer where
   type BaseClass GodotSimulaServer = GodotSpatial
-  super (GodotSimulaServer obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotSpatial obj
+  super (GodotSimulaServer obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotSpatial obj
 
 type SurfaceMap = OMap GodotWlrSurface CanvasSurface
 
@@ -398,6 +422,72 @@ data DampSensitivity = DampSensitivity {
   , _dsPinch       :: Float
 }
 
+data TmuxSessionInfo = TmuxSessionInfo
+  { _tsiSessionName   :: Text
+  , _tsiLocation      :: Maybe String
+  , _tsiPosition      :: V3 Double
+  , _tsiRotation      :: V3 Double
+  , _tsiDimensions    :: SpriteDimensions
+  , _tsiProcessID     :: Int
+  , _tsiKittyWindowId :: Maybe Text
+  , _tsiRestorePosition :: Maybe (V3 Double)
+  } deriving (Show, Generic)
+
+instance Aeson.ToJSON TmuxSessionInfo where
+  toJSON (TmuxSessionInfo sessionName location pos rot dims pid kittyWin restorePos) = Aeson.object
+    [ "sessionName"   Aeson..= sessionName
+    , "location"      Aeson..= location
+    , "position"      Aeson..= Aeson.object [ "x" Aeson..= (pos ^. _x), "y" Aeson..= (pos ^. _y), "z" Aeson..= (pos ^. _z) ]
+    , "rotation"      Aeson..= Aeson.object [ "x" Aeson..= (rot ^. _x), "y" Aeson..= (rot ^. _y), "z" Aeson..= (rot ^. _z) ]
+    , "dimensions"    Aeson..= dims
+    , "processID"     Aeson..= pid
+    , "kittyWindowId" Aeson..= kittyWin
+    , "restorePosition" Aeson..= (fmap (\rp -> Aeson.object [ "x" Aeson..= (rp ^. _x), "y" Aeson..= (rp ^. _y), "z" Aeson..= (rp ^. _z) ]) restorePos)
+    ]
+
+instance Aeson.FromJSON TmuxSessionInfo where
+  parseJSON = Aeson.withObject "TmuxSessionInfo" $ \v -> do
+    sessionName <- v Aeson..: "sessionName"
+    location <- v Aeson..: "location"
+    positionObj <- v Aeson..: "position"
+    rotationObj <- v Aeson..: "rotation"
+    let posX = positionObj Aeson..: "x"
+    let posY = positionObj Aeson..: "y"
+    let posZ = positionObj Aeson..: "z"
+    let rotx = rotationObj Aeson..: "x"
+    let roty = rotationObj Aeson..: "y"
+    let rotz = rotationObj Aeson..: "z"
+    pos <- V3 <$> posX <*> posY <*> posZ
+    rot <- V3 <$> rotx <*> roty <*> rotz
+    dims <- v Aeson..: "dimensions"
+    pid <- v Aeson..: "processID"
+    kittyWin <- v Aeson..: "kittyWindowId"
+    restorePos <- (v Aeson..:? "restorePosition") >>= \case
+      Nothing -> return Nothing
+      Just obj -> do
+        rx <- obj Aeson..: "x"
+        ry <- obj Aeson..: "y"
+        rz <- obj Aeson..: "z"
+        return $ Just (V3 rx ry rz)
+    return $ TmuxSessionInfo sessionName location pos rot dims pid kittyWin restorePos
+
+data TerminalState = TerminalState
+  { _tsSessions   :: [TmuxSessionInfo]
+  , _tsLastClosed :: Data.Time.Clock.UTCTime
+  } deriving (Show, Generic)
+
+instance Aeson.ToJSON TerminalState where
+  toJSON (TerminalState sessions lastClosed) = Aeson.object
+    [ "sessions"    Aeson..= sessions
+    , "lastClosed"  Aeson..= Data.Time.Format.ISO8601.iso8601Show lastClosed
+    ]
+
+instance Aeson.FromJSON TerminalState where
+  parseJSON = Aeson.withObject "TerminalState" $ \v -> TerminalState
+    <$> v Aeson..: "sessions"
+    <*> (v Aeson..: "lastClosed" >>= parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ")
+
+
 makeLenses ''GodotSimulaViewSprite
 makeLenses ''CanvasBase
 makeLenses ''CanvasSurface
@@ -411,6 +501,8 @@ makeLenses ''StartingApps
 makeLenses ''Configuration
 makeLenses ''HUD
 makeLenses ''HandTelekinesis
+makeLenses ''TmuxSessionInfo
+makeLenses ''TerminalState
 makeLenses ''GodotLeapMotion
 makeLenses ''LeapHand
 makeLenses ''DampSensitivity
@@ -617,7 +709,8 @@ getSingleton constr name = do
   name' <- toLowLevel name
   b <- G.has_singleton engine name'
   res <- if b then G.get_singleton engine name' >>= asClass' constr name
-              else error $ "No singleton named " ++ (Data.Text.unpack name)
+              else do Api.godot_string_destroy name'
+                      error $ "No singleton named " ++ (Data.Text.unpack name)
   Api.godot_string_destroy name'
   return res
 
@@ -762,18 +855,29 @@ logGSVS str gsvs = do
                                                       appendFile "log.txt" $ ("  wlrSurface: " ++ (show wlrSurface)) ++ "\n"
   appendFile "log.txt" $ "  isMapped: " ++ (show isMapped) ++ "\n"
 
+{-# NOINLINE logPathRef #-}
+logPathRef :: IORef (Maybe FilePath)
+logPathRef = unsafePerformIO $ newIORef Nothing
+
+initLogPath :: IO ()
+initLogPath = do
+  maybeLogDir <- lookupEnv "SIMULA_LOG_DIR"
+  let logDir = fromMaybe "." maybeLogDir
+  let logPath = logDir ++ "/log.txt"
+  createDirectoryIfMissing True logDir
+  writeIORef logPathRef (Just logPath)
+  putStrLn $ "INIT LOG: " ++ logPath
+
 logStr :: String -> IO ()
 logStr string = do
   time <- getCurrentTime
-  maybeLogDir <- lookupEnv "SIMULA_LOG_DIR"
-  let logDir = fromMaybe "." maybeLogDir
-  createDirectoryIfMissing True logDir
-  let logPath = logDir ++ "/log.txt"
-  -- Catching exceptions to prevent "resource busy" crashes
-  res <- Control.Exception.Safe.try (appendFile logPath $ "[" ++ (show time) ++ "] " ++ string ++ "\n") :: IO (Either IOException ())
-  case res of
-    Left e -> putStrLn $ "Warning: Could not write to log file: " ++ show e
-    Right _ -> return ()
+  mpath <- readIORef logPathRef
+  case mpath of
+    Just logPath -> (appendFile logPath $ "[" ++ (show time) ++ "] " ++ string ++ "\n")
+                    `catch` (\(_ :: SomeException) -> return ())
+    Nothing -> do
+      putStrLn $ "LOG_NOCACHE: " ++ string
+      putStrLn $ "[" ++ (show time) ++ "] " ++ string
 
 logPutStrLn :: String -> IO ()
 logPutStrLn string = do
@@ -916,7 +1020,7 @@ appLaunch gss appStr maybeLocation = do
   case (appStr, maybeXwaylandDisplay) of
     ("nullApp", _) -> return $ fromInteger 0
     ("launchHMDWebcam", _) -> launchHMDWebCam gss maybeLocation
-    ("launchTerminal", _) -> terminalLaunch gss maybeLocation
+    ("launchTerminal", _) -> terminalLaunch gss maybeLocation Nothing
     ("launchUsageInstructions", _) -> appLaunch gss "midori https://github.com/SimulaVR/Simula#usage -p" maybeLocation
     (_, Nothing) -> logPutStrLn "No DISPLAY found!" >> (return $ fromInteger 0)
     (_, (Just xwaylandDisplay)) -> do
@@ -943,18 +1047,17 @@ appLaunch gss appStr maybeLocation = do
       
       let envMapWithDisplay = M.insert "DISPLAY" xwaylandDisplay envMapClean
       let isKitty = "kitty" `Data.List.isInfixOf` appStr
-      let isTerminal = "xfce4-terminal" `Data.List.isInfixOf` appStr || isKitty
-      
-      logPutStrLn $ "appLaunch: isTerminal=" ++ (show isTerminal)
+      let isTerminal = "sakura" `Data.List.isInfixOf` appStr || "xterm" `Data.List.isInfixOf` appStr || "xfce4-terminal" `Data.List.isInfixOf` appStr || isKitty
+
       let envMapWithWaylandDisplay = if isTerminal
                                      then M.delete "WAYLAND_DISPLAY" envMapWithDisplay
                                      else M.insert "WAYLAND_DISPLAY" "simula-0" envMapWithDisplay
       
-      -- Force Kitty to use X11 if it's struggling with Wayland EGL in Simula
       let envMapWithKittyFix = if isKitty
                                then M.insert "KITTY_ENABLE_WAYLAND" "0" envMapWithWaylandDisplay
                                else envMapWithWaylandDisplay
 
+      logPutStrLn $ "appLaunch: isTerminal=" ++ (show isTerminal)
       let envMapWithLocation = case maybeLocation of
                                     Just location -> M.insert "SIMULA_STARTING_LOCATION" location envMapWithKittyFix
                                     Nothing -> envMapWithKittyFix
@@ -971,19 +1074,22 @@ appLaunch gss appStr maybeLocation = do
                   Left e -> do
                     logPutStrLn $ "appLaunch: failed to start " ++ appStr ++ ": " ++ show e
                     return $ fromInteger 0
-                  Right (_, _, _, processHandle) -> do maybePid <- System.Process.getPid processHandle
-                                                       case maybePid of
-                                                            Just pid -> do
-                                                              logPutStrLn $ "appLaunch: started " ++ appStr ++ " with pid " ++ show pid
-                                                              forkIO $ do
-                                                                exitCode <- waitForProcess processHandle
-                                                                logPutStrLn $ "appLaunch: process " ++ appStr ++ " (pid " ++ show pid ++ ") exited with " ++ show exitCode
-                                                              return pid
-                                                            Nothing -> return $ fromInteger $ 0
+                  Right (_, _, _, processHandle) -> do 
+                    maybePid <- System.Process.getPid processHandle
+                    case maybePid of
+                      Just pid -> do
+                        logPutStrLn $ "appLaunch: started " ++ appStr ++ " with pid " ++ show pid
+                        forkIO $ do
+                          res <- Control.Exception.Safe.try $ waitForProcess processHandle :: IO (Either IOException ExitCode)
+                          case res of
+                            Left e -> logPutStrLn $ "appLaunch: exception waiting for process " ++ appStr ++ " (pid " ++ show pid ++ "): " ++ show e
+                            Right exitCode -> logPutStrLn $ "appLaunch: process " ++ appStr ++ " (pid " ++ show pid ++ ") exited with " ++ show exitCode
+                        return pid
+                      Nothing -> return $ fromInteger $ 0
       startingAppPids <- readTVarIO (gss ^. gssStartingAppPids)
       case maybeLocation of
         Nothing -> return ()
-        Just location -> do let startingAppPids' = M.insertWith (++) pid [location] startingAppPids
+        Just location -> do let !startingAppPids' = M.insertWith (++) pid [location] startingAppPids
                             atomically $ writeTVar (gss ^. gssStartingAppPids) startingAppPids'
       return pid
 
@@ -1009,17 +1115,106 @@ launchHMDWebCam gss maybeLocation = do
                                                                        "Valve", -- Valve Index?
                                                                        "Etron"] -- Valve Index
                             
-terminalLaunch :: GodotSimulaServer -> Maybe String -> IO ProcessID
-terminalLaunch gss maybeLocation = do
+terminalLaunch :: GodotSimulaServer -> Maybe String -> Maybe (V3 Double) -> IO ProcessID
+terminalLaunch gss maybeLocation maybeRestorePos = do
   maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
   let appDir = fromMaybe "./result/bin" maybeAppDir
   terminalPath <- System.Directory.doesFileExist (appDir ++ "/kitty") >>= \case
     True -> return (appDir ++ "/kitty")
     False -> return "kitty"
-  let kittyFontArgs = if "kitty" `Data.List.isInfixOf` terminalPath
-                      then " -o font_family=\"Fira Code\""
-                      else ""
-  appLaunch gss (terminalPath ++ kittyFontArgs ++ " bash -i") maybeLocation
+  let fontArgs = if "kitty" `Data.List.isInfixOf` terminalPath
+                 then " -o font_family=\"Fira Code\" -o background_opacity=1 -o background=#000000 -o foreground=#ffffff -o confirm_os_window_close=0"
+                 else ""
+
+  sessionName <- pack <$> generateUniqueSessionName
+  logPutStrLn $ "Creating tmux session: " ++ unpack sessionName
+  tmuxPid <- createTmuxSession sessionName
+  logPutStrLn $ "Created tmux session with PID: " ++ show tmuxPid
+
+  atomically $ do
+    sessionMap <- readTVar (gss ^. gssTmuxSessionMap)
+    let sessionInfo = TmuxSessionInfo
+          { _tsiSessionName = sessionName
+          , _tsiLocation = maybeLocation
+          , _tsiPosition = V3 0 0 0
+          , _tsiRotation = V3 0 0 0
+          , _tsiDimensions = SpriteDimensions (1920, 1080)
+          , _tsiProcessID = fromIntegral tmuxPid
+          , _tsiKittyWindowId = Nothing
+          , _tsiRestorePosition = maybeRestorePos
+          }
+    writeTVar (gss ^. gssTmuxSessionMap) (M.insert (fromIntegral tmuxPid) sessionInfo sessionMap)
+
+  let tmuxCmd = "tmux attach -t " ++ unpack sessionName
+  appLaunch gss (terminalPath ++ fontArgs ++ " " ++ tmuxCmd) maybeLocation
+
+attachToExistingTmuxSession :: GodotSimulaServer -> TmuxSessionInfo -> Maybe String -> IO ProcessID
+attachToExistingTmuxSession gss session maybeLocation = do
+  let sessionName = _tsiSessionName session
+  maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
+  let appDir = fromMaybe "./result/bin" maybeAppDir
+  terminalPath <- System.Directory.doesFileExist (appDir ++ "/kitty") >>= \case
+    True -> return (appDir ++ "/kitty")
+    False -> return "kitty"
+  let fontArgs = if "kitty" `Data.List.isInfixOf` terminalPath
+                 then " -o font_family=\"Fira Code\" -o background_opacity=1 -o background=#000000 -o foreground=#ffffff -o confirm_os_window_close=0"
+                 else ""
+  let tmuxCmd = "tmux attach -t " ++ unpack sessionName
+  atomically $ do
+    sessionMap <- readTVar (gss ^. gssTmuxSessionMap)
+    let pid = _tsiProcessID session
+    writeTVar (gss ^. gssTmuxSessionMap) (M.insert pid session sessionMap)
+  appLaunch gss (terminalPath ++ fontArgs ++ " " ++ tmuxCmd) maybeLocation
+
+generateUniqueSessionName :: IO String
+generateUniqueSessionName = do
+  uuid <- nextUUID
+  return $ "simula-term-" ++ Data.Maybe.maybe "unknown" toString uuid
+
+createTmuxSession :: Text -> IO ProcessID
+createTmuxSession sessionName = do
+  let sessionStr = unpack sessionName
+  (_, _, _, handle) <- createProcess
+    (proc "tmux" ["new-session", "-d", "-s", sessionStr, "bash", "-i"])
+    { std_in = CreatePipe
+    , std_out = CreatePipe
+    , std_err = CreatePipe
+    }
+  maybePid <- System.Process.getPid handle
+  case maybePid of
+    Just pid -> return pid
+    Nothing -> do
+      logPutStrLn $ "Failed to get PID for tmux session: " ++ sessionStr
+      error $ "Failed to create tmux session: " ++ sessionStr
+
+tmuxSessionExists :: Text -> IO Bool
+tmuxSessionExists sessionName = do
+  let sessionStr = unpack sessionName
+  exitCode <- rawSystem "tmux" ["has-session", "-t", sessionStr]
+  return $ exitCode == ExitSuccess
+
+killTmuxSession :: Text -> IO ()
+killTmuxSession sessionName = do
+  let sessionStr = unpack sessionName
+  Control.Monad.void $ rawSystem "tmux" ["kill-session", "-t", sessionStr]
+
+updateTmuxSessionPosition :: GodotSimulaViewSprite -> IO ()
+updateTmuxSessionPosition gsvs = do
+  gss <- readTVarIO (gsvs ^. gsvsServer)
+  tmuxMap <- atomically $ readTVar (gss ^. gssTmuxSessionMap)
+  when (M.size tmuxMap > 0) $ do
+    (TF _ pos) <- G.get_global_transform gsvs >>= fromLowLevel
+    let posV3 = fmap realToFrac pos
+    dims <- readTVarIO (gsvs ^. gsvsTargetSize)
+    let dimsVal = Data.Maybe.fromMaybe (SpriteDimensions (1920, 1080)) dims
+    let updateSession info = info
+          { _tsiPosition = posV3
+          , _tsiDimensions = dimsVal
+          }
+    atomically $ do
+      sessionMap <- readTVar (gss ^. gssTmuxSessionMap)
+      let updatedMap = M.map updateSession sessionMap
+      writeTVar (gss ^. gssTmuxSessionMap) updatedMap
 
 getTextureFromURL :: String -> IO (Maybe GodotTexture)
 getTextureFromURL urlStr = do
@@ -1027,11 +1222,13 @@ getTextureFromURL urlStr = do
    godotImageTexture <- unsafeInstance GodotImageTexture "ImageTexture"
    pngUrl <- toLowLevel (pack urlStr) :: IO GodotString
    exitCode <- G.load godotImage pngUrl
-   -- G.compress godotImage G.COMPRESS_ETC2 G.COMPRESS_SOURCE_GENERIC 1
    G.create_from_image godotImageTexture godotImage G.TEXTURE_FLAGS_DEFAULT
    Api.godot_string_destroy pngUrl
    Api.godot_object_destroy $ safeCast godotImage
-   if (unsafeCoerce godotImageTexture == nullPtr) then (return Nothing) else (return (Just (safeCast godotImageTexture)))
+   let isNull = (unsafeCoerce godotImageTexture == nullPtr)
+   if isNull 
+     then return Nothing 
+     else return (Just (safeCast godotImageTexture))
 
 getSimulaNixStorePath :: String -> IO FilePath
 getSimulaNixStorePath dirName = do
@@ -1099,7 +1296,6 @@ next (Just e) l@(x:_) = Just $ case Data.List.dropWhile (/= e) l of
                           (_:y:_) -> y
                           _       -> x
 
--- TODO: This leaks. Fix it.
 cycleGSSEnvironment :: GodotSimulaServer -> IO ()
 cycleGSSEnvironment gss = do
   (worldEnvironment, currentTextureStr) <- readTVarIO (gss ^. gssWorldEnvironment)
@@ -1112,13 +1308,13 @@ cycleGSSEnvironment gss = do
   case maybeNextTextureStr of
     Nothing -> logPutStrLn $ "Unable to cycle environment texture!"
     Just nextTextureStr -> do
-      atomically $ writeTVar (gss ^. gssWorldEnvironment) (worldEnvironment, nextTextureStr)
-      maybeNextTexture <- getEnvironmentTexture worldEnvironment nextTextureStr
+      let !nextTextureStr' = nextTextureStr
+      atomically $ writeTVar (gss ^. gssWorldEnvironment) (worldEnvironment, nextTextureStr')
+      maybeNextTexture <- getEnvironmentTexture worldEnvironment nextTextureStr'
       case maybeNextTexture of
         Nothing -> logPutStrLn "Unable to cycle environment texture!"
         Just nextTexture -> do oldTex <- G.get_panorama panoramaSky :: IO GodotTexture
                                G.set_panorama panoramaSky nextTexture
-                               -- G.unreference @GodotReference (safeCast oldTex) -- Doesn't work here
                                Api.godot_object_destroy $ safeCast oldTex
                                return ()
 
@@ -1147,12 +1343,14 @@ cycleGSSScene gss = do
   case (maybeCurrentScene, maybeNextSceneStr, maybeNextSceneNode) of
     (Nothing, Just nextSceneStr, Just nextSceneNode) -> do
       addChild gss nextSceneNode
-      atomically $ writeTVar (gss ^. gssScene) $ Just (nextSceneStr, nextSceneNode)
+      let !nextSceneStr' = nextSceneStr
+      atomically $ writeTVar (gss ^. gssScene) $ Just (nextSceneStr', nextSceneNode)
     (Just (currentSceneStr, currentSceneNode), Just nextSceneStr, Just nextSceneNode) -> do
       removeChild gss currentSceneNode
       queueFreeNodeAndChildren currentSceneNode
       addChild gss nextSceneNode
-      atomically $ writeTVar (gss ^. gssScene) $ Just (nextSceneStr, nextSceneNode)
+      let !nextSceneStr' = nextSceneStr
+      atomically $ writeTVar (gss ^. gssScene) $ Just (nextSceneStr', nextSceneNode)
     _ -> logPutStrLn "Unable to change scenes!"
   where head' :: [a] -> Maybe a
         head' [] = Nothing
@@ -1234,10 +1432,14 @@ resizeGSVS gsvs resizeMethod factor =
                 True -> do V3 1 1 1 ^* (1 + 1 * (1 - factor)) & toLowLevel >>= G.scale_object_local (safeCast gsvs :: GodotSpatial)
                            return $ SpriteDimensions (round $ ((fromIntegral w) * factor), round $ ((fromIntegral h) * factor))
 
-     atomically $ do if resizeMethod == Zoom then return () else writeTVar (gsvs ^. gsvsResizedLastFrame) True
-                     writeTVar (gsvs ^. gsvsTargetSize) (Just newTargetDims)
-                     writeTVar (gsvs ^. gsvsSpilloverDims) (Just (wTarget, hTarget))
-                     writeTVar (gsvs ^. gsvsIsDamaged) True
+     let !resizeFlag = (resizeMethod == Zoom)
+     atomically $ do 
+       if resizeFlag then return () else writeTVar (gsvs ^. gsvsResizedLastFrame) True
+       let !newTargetDims' = newTargetDims
+       writeTVar (gsvs ^. gsvsTargetSize) (Just newTargetDims')
+       let !spilloverDims' = (Just (wTarget, hTarget))
+       writeTVar (gsvs ^. gsvsSpilloverDims) spilloverDims'
+       writeTVar (gsvs ^. gsvsIsDamaged) True
 
 defaultSizeGSVS :: GodotSimulaViewSprite -> IO ()
 defaultSizeGSVS gsvs = do
@@ -1251,7 +1453,8 @@ defaultSizeGSVS gsvs = do
                                                        Just windowResolution'@(x, y) ->  SpriteDimensions (fromIntegral x, fromIntegral y)
                                                        Nothing -> SpriteDimensions (900, 900)
 
-    atomically $ do writeTVar (gsvs ^. gsvsTargetSize) (Just newTargetDims)
+    let !newTargetDims' = newTargetDims
+    atomically $ do writeTVar (gsvs ^. gsvsTargetSize) (Just newTargetDims')
                     writeTVar (gsvs ^. gsvsIsDamaged) True
 
 getQuadMesh :: GodotSimulaViewSprite -> IO GodotQuadMesh
@@ -1528,21 +1731,24 @@ keyboardGrabInitiate gss (GrabWindow gsvs _) = do
                posHMD  <- Api.godot_transform_get_origin hmdTransform
                dist <- realToFrac <$> Api.godot_vector3_distance_to posGSVS posHMD
                -- Load state
-               atomically $ writeTVar (gss ^. gssGrab) (Just (GrabWindow gsvs (-dist)))
+               let !grabState = Just (GrabWindow gsvs (-dist))
+               atomically $ writeTVar (gss ^. gssGrab) grabState
   return ()
 keyboardGrabInitiate gss (GrabWindows _) = do
   -- TODO: Ensure that we aren't keyboard grabbing other workspaces, w/o messing up diff state
   -- keyboardGrabLetGo gss GrabWorkspaces
 
   povTransform <- getARVRCameraOrPancakeCameraTransform gss
-  atomically $ writeTVar (gss ^. gssGrab) (Just (GrabWindows povTransform))
+  let !grabState = Just (GrabWindows povTransform)
+  atomically $ writeTVar (gss ^. gssGrab) grabState
 
 keyboardGrabInitiate gss (GrabWorkspaces _)  = do
   -- TODO: Ensure that we aren't keyboard grabbing anything else, w/o messing up diff state
   -- keyboardGrabLetGo gss (GrabWorkspaces _)
 
   povTransform <- getARVRCameraOrPancakeCameraTransform gss
-  atomically $ writeTVar (gss ^. gssGrab) (Just (GrabWorkspaces povTransform))
+  let !grabState = Just (GrabWorkspaces povTransform)
+  atomically $ writeTVar (gss ^. gssGrab) grabState
 
 keyboardGrabLetGo :: GodotSimulaServer -> Grab -> IO ()
 keyboardGrabLetGo gss (GrabWindow gsvs _)  = do
@@ -1644,15 +1850,23 @@ rotateWorkspaceHorizontally gss radians rotationMethod = do
   (currentWorkspace, currentWorkspaceStr) <- readTVarIO (gss ^. gssWorkspace)
   currentWorkspaceTransform <- G.get_transform currentWorkspace
 
-  -- compute new transform
-  rotationAxisY <- toLowLevel (V3 0 1 0) :: IO GodotVector3
+  -- compute new transform using global axis rotation
+  let cosA = cos (realToFrac radians :: Double)
+      sinA = sin (realToFrac radians :: Double)
+      rotBasis :: M33 Float
+      rotBasis = V3 (V3 (realToFrac cosA) 0 (realToFrac sinA))
+                    (V3 0 1 0)
+                    (V3 (realToFrac (-sinA)) 0 (realToFrac cosA))
+  rotationTransform <- toLowLevel (TF rotBasis (V3 0 0 0) :: Transform)
   case rotationMethod of
       Workspace -> do
-        G.rotate currentWorkspace rotationAxisY radians
+        newTransform <- Api.godot_transform_operator_multiply rotationTransform currentWorkspaceTransform
+        G.set_transform currentWorkspace newTransform
         currentWorkspaceTransform <- G.get_transform currentWorkspace
         updateDiffMap gss currentWorkspace currentWorkspaceTransform
       Workspaces -> do
-        G.rotate gss rotationAxisY radians
+        newTransform <- Api.godot_transform_operator_multiply rotationTransform currentWorkspaceTransform
+        G.set_transform gss newTransform
         gssTransform <- G.get_transform gss
         updateDiffMap gss (safeCast gss) gssTransform
 
@@ -1667,20 +1881,27 @@ rotateWorkspaceVertically gss radians rotationMethod = do
   (currentWorkspace, currentWorkspaceStr) <- readTVarIO (gss ^. gssWorkspace)
   currentWorkspaceTransform <- G.get_transform currentWorkspace
 
-  -- compute new transform
-  rotationAxisX <- toLowLevel (V3 1 0 0) :: IO GodotVector3
+  -- compute new transform using global axis rotation
+  let cosA = cos (realToFrac radians :: Double)
+      sinA = sin (realToFrac radians :: Double)
+      rotBasis :: M33 Float
+      rotBasis = V3 (V3 1 0 0)
+                    (V3 0 (realToFrac cosA) (realToFrac sinA))
+                    (V3 0 (realToFrac (-sinA)) (realToFrac cosA))
+  rotationTransform <- toLowLevel (TF rotBasis (V3 0 0 0) :: Transform)
   case rotationMethod of
       Workspace -> do
-        G.rotate currentWorkspace rotationAxisX radians
+        newTransform <- Api.godot_transform_operator_multiply rotationTransform currentWorkspaceTransform
+        G.set_transform currentWorkspace newTransform
         currentWorkspaceTransform <- G.get_transform currentWorkspace
         updateDiffMap gss currentWorkspace currentWorkspaceTransform
       Workspaces -> do
-        G.rotate gss rotationAxisX radians
+        newTransform <- Api.godot_transform_operator_multiply rotationTransform currentWorkspaceTransform
+        G.set_transform gss newTransform
         gssTransform <- G.get_transform gss
         updateDiffMap gss (safeCast gss) gssTransform
 
   -- update new diff map
-  return ()
   return ()
 
 queueFreeNodeAndChildren :: GodotNode -> IO ()
@@ -1847,6 +2068,7 @@ forkUpdateHUDRecursively gss = do
             Just line -> logPutStrLn $ "i3status stderr: " ++ (unpack line)
             Nothing -> return ()
       _ <- forkIO $ updateHUDRecursively gss out'
+      _ <- forkIO $ updateMemoryUsageRecursively gss
       return ()
   return ()
 
@@ -1854,9 +2076,18 @@ forkUpdateHUDRecursively gss = do
     updateHUDRecursively :: GodotSimulaServer -> System.IO.Streams.InputStream Text -> IO ()
     updateHUDRecursively gss out' = do
       updatei3StatusHUD gss out'
-      mem <- logMemPid gss
-      atomically $ modifyTVar (gss ^. gssHUD) (\h -> h { _hudMemoryUsage = mem })
       updateHUDRecursively gss out'
+
+    updateMemoryUsageRecursively :: GodotSimulaServer -> IO ()
+    updateMemoryUsageRecursively gss = do
+      mem <- logMemPid gss
+      let !mem' = mem
+      atomically $ modifyTVar' (gss ^. gssHUD) (\h -> h { _hudMemoryUsage = mem' })
+      delayVar <- registerDelay 5000000
+      atomically $ do
+        ready <- readTVar delayVar
+        check ready
+      updateMemoryUsageRecursively gss
       
 updatei3StatusHUD :: GodotSimulaServer -> System.IO.Streams.InputStream Text -> IO ()
 updatei3StatusHUD gss out' = do
