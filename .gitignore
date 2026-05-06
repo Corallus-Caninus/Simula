@@ -26,3 +26,4 @@ config/HUD.config
 
 # nix-direnv
 .direnv/
+nvenv/
