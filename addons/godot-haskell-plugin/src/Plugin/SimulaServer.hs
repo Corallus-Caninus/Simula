@@ -728,57 +728,19 @@ process gss [deltaGV] = do
   delta <- fromGodotVariant deltaGV :: IO Float
   when wasdMode $ processWASDMovement gss delta
 
-  -- Update Simula HUD
-  hud <- readTVarIO (gss ^. gssHUD)
-  (currentWorkspace, currentWorkspaceStr) <- readTVarIO (gss ^. gssWorkspace)
+  -- Log FPS periodically
   fps <- getSingleton Godot_Engine "Engine" >>= (\engine -> G.get_frames_per_second engine)
-  let simulaMemoryUsage = (hud ^. hudMemoryUsage)
-  screenRecorder <- readTVarIO (gss ^. gssScreenRecorder)
+  logFps fps
 
-  let workspaceStatus = currentWorkspaceStr ++ (show $ round fps) ++ (show $ round simulaMemoryUsage) ++ (show $ isJust screenRecorder)
-  let i3status = (hud ^. hudI3Status)
-
-  -- Update Workspace HUD if changed
-  when (workspaceStatus /= (hud ^. hudLastWorkspaceStatus)) $ do
-    -- logPutStrLn $ "Updating Workspace HUD: " ++ workspaceStatus
-    let rtLabelW = (hud ^. hudRtlWorkspace)
-    let svr = (hud ^. hudSvrTexture)
-    let dynamicFont = (hud ^. hudDynamicFont)
-    G.clear rtLabelW
-    G.push_font rtLabelW (safeCast dynamicFont)
-    G.append_bbcode rtLabelW `withGodotString` (pack currentWorkspaceStr)
-    G.append_bbcode rtLabelW `withGodotString` " | "
-    G.add_image rtLabelW svr 19 19
-    G.append_bbcode rtLabelW `withGodotString` " "
-    G.append_bbcode rtLabelW `withGodotString` (pack $ (show $ round fps) ++ " FPS ")
-    G.append_bbcode rtLabelW `withGodotString` (pack ("@ " ++ (show $ round simulaMemoryUsage) ++ " MB"))
-    G.append_bbcode rtLabelW `withGodotString` " |"
-    case screenRecorder of
-      Nothing -> return ()
-      Just ph -> do
-        redColor <- (toLowLevel $ (rgb 1.0 0.0 0.0) `withOpacity` 1.0) :: IO GodotColor
-        G.push_color rtLabelW redColor
-        G.append_bbcode rtLabelW `withGodotString` " ⚬ "
-        G.pop rtLabelW
-        return ()
-    G.pop rtLabelW
-    let !workspaceStatus' = workspaceStatus
-    atomically $ modifyTVar' (gss ^. gssHUD) (\h -> h { _hudLastWorkspaceStatus = workspaceStatus' })
-
-  -- Update i3status HUD if changed
-  when (i3status /= (hud ^. hudLastI3Status)) $ do
-    -- logPutStrLn $ "Updating i3status HUD: " ++ i3status
-    let rtLabel = (hud ^. hudRtlI3)
-    let dynamicFont = (hud ^. hudDynamicFont)
-    G.clear rtLabel
-    G.push_font rtLabel (safeCast dynamicFont)
-    G.push_align rtLabel 2
-    G.append_bbcode rtLabel `withGodotString` (pack i3status)
-    G.pop rtLabel
-    G.pop rtLabel
-    let !i3status' = i3status
-    atomically $ modifyTVar' (gss ^. gssHUD) (\h -> h { _hudLastI3Status = i3status' })
-  -- logPutStrLn "SimulaServer.process end"
+  -- HUD display disabled to reduce memory pressure
+  -- hud <- readTVarIO (gss ^. gssHUD)
+  -- (currentWorkspace, currentWorkspaceStr) <- readTVarIO (gss ^. gssWorkspace)
+  -- let simulaMemoryUsage = (hud ^. hudMemoryUsage)
+  -- screenRecorder <- readTVarIO (gss ^. gssScreenRecorder)
+  --
+  -- let workspaceStatus = ...
+  -- (HUD update code commented out)
+  -- let i3status = (hud ^. hudI3Status)
 
 ready :: GodotSimulaServer -> [GodotVariant] -> IO ()
 ready gss _ = do

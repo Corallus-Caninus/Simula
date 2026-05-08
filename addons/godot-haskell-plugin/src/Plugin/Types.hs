@@ -770,6 +770,16 @@ destroyMaybe :: GodotReference -> IO ()
 destroyMaybe ref =
   whenM (G.unreference @GodotReference ref) (Api.godot_object_destroy $ safeCast ref)
 
+withTexture :: IO tex -> (tex -> IO a) -> IO a
+withTexture getter action = do
+  tex <- getter
+  action tex `finally` destroyMaybe (unsafeCoerce tex :: GodotReference)
+
+withMaterial :: IO mat -> (mat -> IO a) -> IO a
+withMaterial getter action = do
+  mat <- getter
+  action mat `finally` destroyMaybe (unsafeCoerce mat :: GodotReference)
+
 getSurfaceLocalCoordinates :: GodotSimulaViewSprite -> GodotVector3 -> IO (SurfaceLocalCoordinates)
 getSurfaceLocalCoordinates gsvs clickPos = do
   lpos <- G.to_local gsvs clickPos >>= fromLowLevel
@@ -859,6 +869,10 @@ logGSVS str gsvs = do
 logPathRef :: IORef (Maybe FilePath)
 logPathRef = unsafePerformIO $ newIORef Nothing
 
+{-# NOINLINE frameCounter #-}
+frameCounter :: IORef Int
+frameCounter = unsafePerformIO $ newIORef 0
+
 initLogPath :: IO ()
 initLogPath = do
   maybeLogDir <- lookupEnv "SIMULA_LOG_DIR"
@@ -883,6 +897,14 @@ logPutStrLn :: String -> IO ()
 logPutStrLn string = do
   logStr string
   putStrLn string
+
+logFps :: Float -> IO ()
+logFps fps = do
+  c <- readIORef frameCounter
+  let !c' = c + 1
+  writeIORef frameCounter c'
+  when (c' `mod` 100 == 0) $
+    logStr $ "fps=" ++ show (round fps)
 
 -- | returns Just pid or Nothing if process has already exited
 getPid :: ProcessHandle -> IO (Maybe ProcessID)
@@ -998,16 +1020,16 @@ type ScreenshotFullPath = String
 savePngPancake :: GodotSimulaServer -> ScreenshotBaseName -> IO (ScreenshotFullPath)
 savePngPancake gss screenshotBaseName = do
   viewport <- G.get_viewport gss :: IO GodotViewport
-  viewportTexture <- G.get_texture viewport
-  pancakeImg <- G.get_data viewportTexture
-  G.flip_y pancakeImg
-  maybeDataDir <- lookupEnv "SIMULA_DATA_DIR"
-  let dataDir = fromMaybe "." maybeDataDir
-  createDirectoryIfMissing False (dataDir ++ "/media")
-  let relativePath = (dataDir ++ "/media/" <> screenshotBaseName <> ".png")
-  fullPath <- System.Directory.canonicalizePath relativePath
-  G.save_png pancakeImg =<< toLowLevel (pack relativePath)
-  return fullPath
+  withTexture (G.get_texture viewport) $ \viewportTexture -> do
+    pancakeImg <- G.get_data viewportTexture
+    G.flip_y pancakeImg
+    maybeDataDir <- lookupEnv "SIMULA_DATA_DIR"
+    let dataDir = fromMaybe "." maybeDataDir
+    createDirectoryIfMissing False (dataDir ++ "/media")
+    let relativePath = (dataDir ++ "/media/" <> screenshotBaseName <> ".png")
+    fullPath <- System.Directory.canonicalizePath relativePath
+    G.save_png pancakeImg =<< toLowLevel (pack relativePath)
+    return fullPath
 
 -- Run shell command with DISPLAY set to our XWayland server value (typically
 -- :2)

@@ -68,6 +68,48 @@ chmod +x ./bin/godot.AppImage
  ./bin/godot # launches Simula (requires SteamVR to be running)
  #+END_SRC
  For installtion troubleshooting, [[https://gitter.im/SimulaVR/Simula][just ask us directly]].
+* Debug Build
+Simula provides a debug build with profiling enabled for detecting memory leaks, thunk leaks, and performance issues.
+
+** Building the Debug Version
+#+BEGIN_SRC shell
+nix build .#simula-debug
+#+END_SRC
+
+This builds Simula with:
+- Haskell profiling enabled (~-fprof-auto~)
+- Runtime system options for heap profiling (~-rtsopts~)
+- Library profiling on all Haskell dependencies
+- Default RTS flags: ~-hT -sstderr~ (heap profile by type + GC stats)
+
+** Running with Profiling
+The debug build outputs profiling data to the current working directory:
+#+BEGIN_SRC shell
+# Run with default profiling (heap profile by type + GC stats)
+./result/bin/simula-debug
+
+# Override RTS flags for specific profiling modes
+GHCRTS="-hy -sstderr" ./result/bin/simula-debug    # Profile by closure type
+GHCRTS="-hT -M2G -sstderr" ./result/bin/simula-debug  # Set heap limit to 2GB
+GHCRTS="-hc -sstderr" ./result/bin/simula-debug    # Profile by cost center
+#+END_SRC
+
+** Profiling Output Files
+| File | Description |
+|------|-------------|
+| ~simula-debug.hp~ | Heap profile data (convert with ~hp2ps -e8in simula-debug.hp~) |
+| ~simula-debug.prof~ | Cost center profile (if ~-p~ flag used) |
+| stderr | GC statistics including live data, GC pauses, and heap usage |
+
+** Key RTS Flags for Thunk Leak Detection
+| Flag | Purpose |
+|------|---------|
+| ~-hT~ | Heap profile by type (shows thunks as ~IND~) |
+| ~-hy~ | Heap profile by closure type |
+| ~-sstderr~ | Print GC stats to stderr |
+| ~-M1G~ | Set heap limit (crash instead of OOM) |
+| ~-I0~ | Disable idle GC (expose leaks faster) |
+
 * Usage
 ** Simula Mouse & Keyboard Controls
 Windows become "active" once you look at them. Active windows receive typing events from the keyboard, and cursor events from mouse movement.  In addition, the following window-manipulation shortcuts are provided by default into Simula (these can be adjusted by changing ~./config.dhall~):
