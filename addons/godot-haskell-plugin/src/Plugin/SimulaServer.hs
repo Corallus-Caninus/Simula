@@ -487,6 +487,7 @@ getKeyboardAction gss keyboardShortcut =
 
         terminateSimula :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         terminateSimula gss _ True = do
+          atomically $ writeTVar (gss ^. gssShuttingDown) True
           logPutStrLn "Saving terminal state..."
           saveAndExportTerminalState gss
           logPutStrLn "Terminating Simula.."
@@ -723,14 +724,14 @@ instance NativeScript GodotSimulaServer where
 
 process :: GodotSimulaServer -> [GodotVariant] -> IO ()
 process gss [deltaGV] = do
-  -- logPutStrLn "SimulaServer.process start"
-  wasdMode <- readTVarIO (gss ^. gssWasdMode)
-  delta <- fromGodotVariant deltaGV :: IO Float
-  when wasdMode $ processWASDMovement gss delta
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else do
+    wasdMode <- readTVarIO (gss ^. gssWasdMode)
+    delta <- fromGodotVariant deltaGV :: IO Float
+    when wasdMode $ processWASDMovement gss delta
 
-  -- Log FPS periodically
-  fps <- getSingleton Godot_Engine "Engine" >>= (\engine -> G.get_frames_per_second engine)
-  logFps fps
+    fps <- getSingleton Godot_Engine "Engine" >>= (\engine -> G.get_frames_per_second engine)
+    logFps fps
 
   -- HUD display disabled to reduce memory pressure
   -- hud <- readTVarIO (gss ^. gssHUD)
@@ -1167,6 +1168,7 @@ initGodotSimulaServer obj = do
       gssTmuxSessionMap' <- newTVarIO M.empty :: IO (TVar (M.Map Int TmuxSessionInfo))
       gssDesktopExported' <- newTVarIO False :: IO (TVar Bool)
       gssPendingRestores' <- newTVarIO [] :: IO (TVar [V3 Double])
+      gssShuttingDown' <- newTVarIO False :: IO (TVar Bool)
 
       gssWorkspaces' <- V.replicateM 10 (unsafeInstance GodotSpatial "Spatial")
       gssWorkspace' <- newTVarIO $ ((gssWorkspaces' V.! 1), "1")
@@ -1284,6 +1286,7 @@ initGodotSimulaServer obj = do
       , _gssTmuxSessionMap          = gssTmuxSessionMap'          :: TVar (M.Map Int TmuxSessionInfo)
       , _gssDesktopExported         = gssDesktopExported'         :: TVar Bool
       , _gssPendingRestores         = gssPendingRestores'         :: TVar [V3 Double]
+      , _gssShuttingDown            = gssShuttingDown'            :: TVar Bool
       }
   return gss
   where getStartingAppsStr :: Maybe String -> String
@@ -1296,12 +1299,18 @@ initGodotSimulaServer obj = do
 
 _on_WaylandDisplay_ready :: GodotSimulaServer -> [GodotVariant] -> IO ()
 _on_WaylandDisplay_ready gss _ = do
-  waylandDisplay <- atomically $ readTVar (_gssWaylandDisplay gss)
-  G.run waylandDisplay
-  return ()
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else do
+    waylandDisplay <- atomically $ readTVar (_gssWaylandDisplay gss)
+    G.run waylandDisplay
 
 _on_WlrXdgShell_new_surface :: GodotSimulaServer -> [GodotVariant] -> IO ()
 _on_WlrXdgShell_new_surface gss [wlrXdgSurfaceVariant] = do
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else _on_WlrXdgShell_new_surface_body gss wlrXdgSurfaceVariant
+
+_on_WlrXdgShell_new_surface_body :: GodotSimulaServer -> GodotVariant -> IO ()
+_on_WlrXdgShell_new_surface_body gss wlrXdgSurfaceVariant = do
   logPutStrLn "_on_WlrXdgShell_new_surface"
   wlrXdgSurface <- (fromGodotVariant wlrXdgSurfaceVariant :: IO GodotWlrXdgSurface) >>= validateSurfaceE
   roleInt <- G.get_role wlrXdgSurface
@@ -1313,69 +1322,67 @@ _on_WlrXdgShell_new_surface gss [wlrXdgSurfaceVariant] = do
         case maybeGSVS of
           Nothing -> logPutStrLn "Unable to connect xdg popup surface signals; no gssActiveCursorGSVS!"
           Just gsvs -> do
-            -- connectGodotSignal wlrSurface "new_subsurface" gsvs "handle_wlr_surface_new_subsurface" [] -- arguably don't need; subsumed by xdg new_popup signal
-            -- connectGodotSignal wlrSurface "commit" gsvs "handle_wlr_surface_commit" []
-            -- connectGodotSignal wlrSurface "destroy" gsvs "handle_wlr_surface_destroy" []  -- arguably don't need; subsumed by xdg destroy signal
             return ()
       1 -> do -- XDG_SURFACE_ROLE_TOPLEVEL
-              wlrXdgToplevel <- G.get_xdg_toplevel wlrXdgSurface >>= validateSurfaceE
-              wlrSurface <- G.get_wlr_surface wlrXdgSurface >>= validateSurfaceE
-              G.set_tiled wlrXdgToplevel True
-              simulaView <- newSimulaView gss wlrXdgSurface
-              gsvs <- newGodotSimulaViewSprite gss simulaView
+               wlrXdgToplevel <- G.get_xdg_toplevel wlrXdgSurface >>= validateSurfaceE
+               wlrSurface <- G.get_wlr_surface wlrXdgSurface >>= validateSurfaceE
+               G.set_tiled wlrXdgToplevel True
+               simulaView <- newSimulaViewXdg gss wlrXdgSurface
+               gsvs <- newGodotSimulaViewSprite gss simulaView
 
-              connectGodotSignal gsvs "map" gss "handle_map_surface" []
-              connectGodotSignal wlrXdgSurface "destroy" gsvs "_handle_destroy" []
-              connectGodotSignal wlrXdgSurface "map" gsvs "_handle_map" []
-              connectGodotSignal wlrXdgSurface "unmap" gsvs "handle_unmap" []
-              connectGodotSignal wlrXdgSurface "new_popup" gsvs "handle_new_popup" []
-              connectGodotSignal wlrXdgToplevel "request_show_window_menu" gsvs "handle_window_menu" []
-              connectGodotSignal wlrSurface "new_subsurface" gsvs "handle_wlr_surface_new_subsurface" []
-              connectGodotSignal wlrSurface "commit" gsvs "handle_wlr_surface_commit" []
-              connectGodotSignal wlrSurface "destroy" gsvs "handle_wlr_surface_destroy" []
+               connectGodotSignal gsvs "map" gss "handle_map_surface" []
+               connectGodotSignal wlrXdgSurface "destroy" gsvs "_handle_destroy" []
+               connectGodotSignal wlrXdgSurface "map" gsvs "_handle_map" []
+               connectGodotSignal wlrXdgSurface "unmap" gsvs "handle_unmap" []
+               connectGodotSignal wlrXdgSurface "new_popup" gsvs "handle_new_popup" []
+               connectGodotSignal wlrXdgToplevel "request_show_window_menu" gsvs "handle_window_menu" []
+               connectGodotSignal wlrSurface "new_subsurface" gsvs "handle_wlr_surface_new_subsurface" []
+               connectGodotSignal wlrSurface "commit" gsvs "handle_wlr_surface_commit" []
+               connectGodotSignal wlrSurface "destroy" gsvs "handle_wlr_surface_destroy" []
 
-              -- We G.set_activated early to prevent weird behavior (e.g. file pickers failing to spawn)
-              G.set_activated wlrXdgToplevel True
-              return ()
+               G.set_activated wlrXdgToplevel True
+               return ()
 
-
-   where newSimulaView :: GodotSimulaServer -> GodotWlrXdgSurface -> IO (SimulaView)
-         newSimulaView gss wlrXdgSurface = do
-          let gss' = gss :: GodotSimulaServer
-          svMapped' <- atomically (newTVar False) :: IO (TVar Bool)
-          let gsvsWlrXdgSurface' = wlrXdgSurface
-          gsvsUUID' <- nextUUID :: IO (Maybe UUID)
-
-          return SimulaView
-              { _svServer           = gss :: GodotSimulaServer
-              , _svMapped           = svMapped' :: TVar Bool
-              , _svWlrEitherSurface = (Left wlrXdgSurface) :: Either GodotWlrXdgSurface GodotWlrXWaylandSurface
-              , _gsvsUUID           = gsvsUUID' :: Maybe UUID
-              }
+newSimulaViewXdg :: GodotSimulaServer -> GodotWlrXdgSurface -> IO (SimulaView)
+newSimulaViewXdg gss wlrXdgSurface = do
+  let gss' = gss :: GodotSimulaServer
+  svMapped' <- atomically (newTVar False) :: IO (TVar Bool)
+  let gsvsWlrXdgSurface' = wlrXdgSurface
+  gsvsUUID' <- nextUUID :: IO (Maybe UUID)
+  return SimulaView
+      { _svServer           = gss :: GodotSimulaServer
+      , _svMapped           = svMapped' :: TVar Bool
+      , _svWlrEitherSurface = (Left wlrXdgSurface) :: Either GodotWlrXdgSurface GodotWlrXWaylandSurface
+      , _gsvsUUID           = gsvsUUID' :: Maybe UUID
+      }
 
 _on_wlr_key :: GodotSimulaServer -> [GodotVariant] -> IO ()
 _on_wlr_key gss [keyboardGVar, eventGVar] = do
-  event <- fromGodotVariant eventGVar :: IO GodotWlrEventKeyboardKey
-  -- time <- G.get_time_msec event
-  -- key <- G.get_keycode event
-  -- logPutStrLn $ "_on_wlr_key: time=" ++ show time ++ " key=" ++ show key
-  wlrSeat <- readTVarIO (gss ^. gssWlrSeat)
-  G.reference event
-  G.keyboard_notify_key wlrSeat event
-  return ()
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else do
+    event <- fromGodotVariant eventGVar :: IO GodotWlrEventKeyboardKey
+    wlrSeat <- readTVarIO (gss ^. gssWlrSeat)
+    G.reference event
+    G.keyboard_notify_key wlrSeat event
 
 _on_wlr_modifiers :: GodotSimulaServer -> [GodotVariant] -> IO ()
 _on_wlr_modifiers gss [keyboardGVar] = do
-  wlrSeat <- readTVarIO (gss ^. gssWlrSeat)
-  G.keyboard_notify_modifiers wlrSeat
-  return ()
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else do
+    wlrSeat <- readTVarIO (gss ^. gssWlrSeat)
+    G.keyboard_notify_modifiers wlrSeat
 
 _on_WlrXWayland_new_surface :: GodotSimulaServer -> [GodotVariant] -> IO ()
 _on_WlrXWayland_new_surface gss [wlrXWaylandSurfaceVariant] = do
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else _on_WlrXWayland_new_surface_body gss wlrXWaylandSurfaceVariant
+
+_on_WlrXWayland_new_surface_body :: GodotSimulaServer -> GodotVariant -> IO ()
+_on_WlrXWayland_new_surface_body gss wlrXWaylandSurfaceVariant = do
   logPutStrLn "_on_WlrXWayland_new_surface"
   wlrXWaylandSurface <- (fromGodotVariant wlrXWaylandSurfaceVariant :: IO GodotWlrXWaylandSurface) >>= validateSurfaceE
   G.reference wlrXWaylandSurface
-  simulaView <- newSimulaView gss wlrXWaylandSurface
+  simulaView <- newSimulaViewXWayland gss wlrXWaylandSurface
   gsvs <- newGodotSimulaViewSprite gss simulaView
 
   connectGodotSignal gsvs "map" gss "handle_map_surface" []
@@ -1388,24 +1395,28 @@ _on_WlrXWayland_new_surface gss [wlrXWaylandSurfaceVariant] = do
   connectGodotSignal wlrXWaylandSurface "unmap_free_child" gsvs "handle_unmap_free_child" []
   connectGodotSignal wlrXWaylandSurface "set_parent" gsvs "handle_set_parent" []
   return ()
-  where newSimulaView :: GodotSimulaServer -> GodotWlrXWaylandSurface -> IO (SimulaView)
-        newSimulaView gss wlrXWaylandSurface = do
-         let gss' = gss :: GodotSimulaServer
-         svMapped' <- atomically (newTVar False) :: IO (TVar Bool)
-         -- let gsvsWlrXWaylandSurface' = wlrXWaylandSurface
-         gsvsUUID' <- nextUUID :: IO (Maybe UUID)
 
-         return SimulaView
-             { _svServer           = gss :: GodotSimulaServer
-             , _svMapped           = svMapped' :: TVar Bool
-             , _svWlrEitherSurface = (Right wlrXWaylandSurface) :: Either GodotWlrXdgSurface GodotWlrXWaylandSurface
-             , _gsvsUUID           = gsvsUUID' :: Maybe UUID
-             }
+newSimulaViewXWayland :: GodotSimulaServer -> GodotWlrXWaylandSurface -> IO (SimulaView)
+newSimulaViewXWayland gss wlrXWaylandSurface = do
+  let gss' = gss :: GodotSimulaServer
+  svMapped' <- atomically (newTVar False) :: IO (TVar Bool)
+  gsvsUUID' <- nextUUID :: IO (Maybe UUID)
+  return SimulaView
+      { _svServer           = gss :: GodotSimulaServer
+      , _svMapped           = svMapped' :: TVar Bool
+      , _svWlrEitherSurface = (Right wlrXWaylandSurface) :: Either GodotWlrXdgSurface GodotWlrXWaylandSurface
+      , _gsvsUUID           = gsvsUUID' :: Maybe UUID
+      }
 
 -- Find the cursor-active gsvs, convert relative godot mouse movement to new
 -- mouse coordinates, and pass off to processClickEvent or pointer_notify_axis
 _input :: GodotSimulaServer -> [GodotVariant] -> IO ()
-_input gss [eventGV] = do
+_input gss args = do
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else _input_body gss args
+
+_input_body :: GodotSimulaServer -> [GodotVariant] -> IO ()
+_input_body gss [eventGV] = do
   event <- fromGodotVariant eventGV :: IO GodotInputEventMouseMotion
   maybeActiveGSVS <- readTVarIO (gss ^. gssActiveCursorGSVS)
 
@@ -1519,7 +1530,12 @@ getHMDLookAtSprite gss = do
 
 
 physicsProcess :: GodotSimulaServer -> [GodotVariant] -> IO ()
-physicsProcess gss _ = do
+physicsProcess gss args = do
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else physicsProcess_body gss args
+
+physicsProcess_body :: GodotSimulaServer -> [GodotVariant] -> IO ()
+physicsProcess_body gss _ = do
   maybeLookAtGSVS <- getHMDLookAtSprite gss
   gsvsActiveCursor <- readTVarIO (gss ^. gssActiveCursorGSVS)
   maybeGssGrab <- readTVarIO (gss ^. gssGrab)
@@ -1562,27 +1578,18 @@ shellCmd1 gss appStr = do
   return ()
 
 _on_simula_shortcut :: GodotSimulaServer -> [GodotVariant] -> IO ()
-_on_simula_shortcut gss [scancodeWithModifiers', isPressed'] = do
+_on_simula_shortcut gss args = do
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else _on_simula_shortcut_body gss args
+
+_on_simula_shortcut_body :: GodotSimulaServer -> [GodotVariant] -> IO ()
+_on_simula_shortcut_body gss [scancodeWithModifiers', isPressed'] = do
   scancodeWithModifiers <- fromGodotVariant scancodeWithModifiers' :: IO Int
   isPressed <- fromGodotVariant isPressed' :: IO Bool
   let modifiers = (foldl (.|.) 0 (extractMods scancodeWithModifiers))
   let keycode = (scancodeWithModifiers .&. G.KEY_CODE_MASK) :: Int
   processKeypress gss modifiers keycode isPressed
 
-  -- TEST CODE
-  -- logPutStrLn $ "isPressed: " ++ (show isPressed)
-  -- logPutStrLn $ "modifiers: " ++ (show modifiers)
-  -- logPutStrLn $ "keycode: " ++ (show keycode)
-
-  -- let testKeys = (foldl (.|.) 0 (extractTestKeys scancodeWithModifiers))
-  -- let testKeys' = "testKeys': " ++ (show (extractTestKeys scancodeWithModifiers))
-  -- logPutStrLn $ "testKeys: " ++ (show testKeys)
-  -- logPutStrLn $ "G.KEY_A: " ++ (show (G.KEY_A))
-  -- logPutStrLn $ "G.KEY_B: " ++ (show (G.KEY_B))
-  -- logPutStrLn $ "G.KEY_BUTTON_LEFT: " ++ (show (G.KEY_BUTTON_LEFT))
-  -- logPutStrLn $ "G.KEY_CONTROL_L: " ++ (show (G.KEY_CONTROL_L))
-  -- logPutStrLn $ "G.KEY_MASK_CTRL: " ++ (show (G.KEY_MASK_CTRL))
-  
   where extractIf sc mod = if (sc .&. mod) /= 0 then [mod] else []
 
         extractMods :: Int -> [Int]
@@ -1590,7 +1597,7 @@ _on_simula_shortcut gss [scancodeWithModifiers', isPressed'] = do
         extractMods _ = []
 
         extractTestKeys :: Int -> [Int]
-        extractTestKeys sc = concatMap (extractIf sc) [G.KEY_A, G.KEY_B, G.KEY_MASK_ALT] 
+        extractTestKeys sc = concatMap (extractIf sc) [G.KEY_A, G.KEY_B, G.KEY_MASK_ALT]
 
 processKeypress :: GodotSimulaServer -> Modifiers -> Keycode -> Bool -> IO ()
 processKeypress gss modifiers keycode isPressed = do
@@ -1707,12 +1714,17 @@ toggleGrabMode = do
   return ()
 
 handle_wlr_compositor_new_surface :: GodotSimulaServer -> [GodotVariant] -> IO ()
-handle_wlr_compositor_new_surface gss args@[wlrSurfaceVariant] = do
+handle_wlr_compositor_new_surface gss args = do
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else handle_wlr_compositor_new_surface_body gss args
+
+handle_wlr_compositor_new_surface_body :: GodotSimulaServer -> [GodotVariant] -> IO ()
+handle_wlr_compositor_new_surface_body gss args@[wlrSurfaceVariant] = do
   logPutStrLn "handle_wlr_compositor_new_surface"
   wlrSurface <- (fromGodotVariant wlrSurfaceVariant :: IO GodotWlrSurface) >>= validateSurfaceE
   maybeGSVS <- readTVarIO (gss ^. gssActiveCursorGSVS)
   case maybeGSVS of
-    Nothing -> return () -- logPutStrLn "Unable to handle_wlr_compositor_new_surface; no gssActiveCursorGSVS!"
+    Nothing -> return ()
     Just gsvs -> do
       connectGodotSignal wlrSurface "new_subsurface" gsvs "handle_wlr_surface_new_subsurface" []
       connectGodotSignal wlrSurface "commit" gsvs "handle_wlr_surface_commit" []
@@ -1720,10 +1732,14 @@ handle_wlr_compositor_new_surface gss args@[wlrSurfaceVariant] = do
       return ()
 
 seat_request_cursor :: GodotSimulaServer -> [GodotVariant] -> IO ()
-seat_request_cursor gss args@[wlrSurfaceCursorVariant] = do
+seat_request_cursor gss args = do
+  shuttingDown <- readTVarIO (gss ^. gssShuttingDown)
+  if shuttingDown then return () else seat_request_cursor_body gss args
+
+seat_request_cursor_body :: GodotSimulaServer -> [GodotVariant] -> IO ()
+seat_request_cursor_body gss args@[wlrSurfaceCursorVariant] = do
   wlrSurfaceCursor <- (fromGodotVariant wlrSurfaceCursorVariant :: IO GodotWlrSurface) >>= validateSurfaceE
   maybeActiveCursorGSVS <- readTVarIO (gss ^. gssActiveCursorGSVS)
   case maybeActiveCursorGSVS of
       Nothing -> logPutStrLn "Unable to find active cursor gsvs; unable to load cursor texture."
       Just gsvs -> atomically $ writeTVar (gsvs ^. gsvsCursor) ((Just wlrSurfaceCursor), Nothing)
-  return ()

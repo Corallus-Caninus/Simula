@@ -313,11 +313,12 @@ data GodotSimulaServer = GodotSimulaServer
   , _gssTmuxSessionMap          :: TVar (M.Map Int TmuxSessionInfo)
   , _gssDesktopExported         :: TVar Bool
   , _gssPendingRestores         :: TVar [V3 Double]
+  , _gssShuttingDown            :: TVar Bool
   }
 
 instance HasBaseClass GodotSimulaServer where
   type BaseClass GodotSimulaServer = GodotSpatial
-  super (GodotSimulaServer obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotSpatial obj
+  super (GodotSimulaServer obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotSpatial obj
 
 type SurfaceMap = OMap GodotWlrSurface CanvasSurface
 
@@ -767,18 +768,9 @@ withGodot allocatedType' destr action  = do
   return ret
 
 destroyMaybe :: GodotReference -> IO ()
-destroyMaybe ref =
-  whenM (G.unreference @GodotReference ref) (Api.godot_object_destroy $ safeCast ref)
-
-withTexture :: IO tex -> (tex -> IO a) -> IO a
-withTexture getter action = do
-  tex <- getter
-  action tex `finally` destroyMaybe (unsafeCoerce tex :: GodotReference)
-
-withMaterial :: IO mat -> (mat -> IO a) -> IO a
-withMaterial getter action = do
-  mat <- getter
-  action mat `finally` destroyMaybe (unsafeCoerce mat :: GodotReference)
+destroyMaybe ref = do
+  _ <- G.unreference @GodotReference ref
+  return ()
 
 getSurfaceLocalCoordinates :: GodotSimulaViewSprite -> GodotVector3 -> IO (SurfaceLocalCoordinates)
 getSurfaceLocalCoordinates gsvs clickPos = do
@@ -1020,16 +1012,16 @@ type ScreenshotFullPath = String
 savePngPancake :: GodotSimulaServer -> ScreenshotBaseName -> IO (ScreenshotFullPath)
 savePngPancake gss screenshotBaseName = do
   viewport <- G.get_viewport gss :: IO GodotViewport
-  withTexture (G.get_texture viewport) $ \viewportTexture -> do
-    pancakeImg <- G.get_data viewportTexture
-    G.flip_y pancakeImg
-    maybeDataDir <- lookupEnv "SIMULA_DATA_DIR"
-    let dataDir = fromMaybe "." maybeDataDir
-    createDirectoryIfMissing False (dataDir ++ "/media")
-    let relativePath = (dataDir ++ "/media/" <> screenshotBaseName <> ".png")
-    fullPath <- System.Directory.canonicalizePath relativePath
-    G.save_png pancakeImg =<< toLowLevel (pack relativePath)
-    return fullPath
+  viewportTexture <- G.get_texture viewport
+  pancakeImg <- G.get_data viewportTexture
+  G.flip_y pancakeImg
+  maybeDataDir <- lookupEnv "SIMULA_DATA_DIR"
+  let dataDir = fromMaybe "." maybeDataDir
+  createDirectoryIfMissing False (dataDir ++ "/media")
+  let relativePath = (dataDir ++ "/media/" <> screenshotBaseName <> ".png")
+  fullPath <- System.Directory.canonicalizePath relativePath
+  G.save_png pancakeImg =<< toLowLevel (pack relativePath)
+  return fullPath
 
 -- Run shell command with DISPLAY set to our XWayland server value (typically
 -- :2)

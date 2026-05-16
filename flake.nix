@@ -228,35 +228,51 @@
               export SIMULA_CONFIG_DIR="$XDG_CONFIG_HOME/Simula"
               export SIMULA_APP_DIR="'$out'/bin"
 
-              # Set high priority for Simula and its children
-              if command -v sudo >/dev/null 2>&1 && command -v renice >/dev/null 2>&1; then
-                  sudo renice -n -20 -p $$ >/dev/null 2>&1 || true                  # Also set priority for SteamVR and ALVR processes if they exist
-                  sudo renice -n -20 -p $(pgrep vrserver) 2>/dev/null || true
-                  sudo renice -n -20 -p $(pgrep vrcompositor) 2>/dev/null || true
-                  sudo renice -n -20 -p $(pgrep alvr) 2>/dev/null || true
-              fi
+              # Set real-time priority for Simula and VR processes only
+              set_niceness() {
+                if command -v sudo >/dev/null 2>&1 && command -v renice >/dev/null 2>&1; then
+                  sudo renice -n -20 -p "$1" >/dev/null 2>&1 || true
+                fi
+                if command -v sudo >/dev/null 2>&1 && command -v ionice >/dev/null 2>&1; then
+                  sudo ionice -c 1 -n 0 -p "$1" >/dev/null 2>&1 || true
+                fi
+              }
+              set_priority_for() {
+                for pid in $(pgrep -x "$1" 2>/dev/null); do set_niceness "$pid"; done
+              }
 
-              # Note: Network priority is not set by this script. Configure separately if needed.
-
-              # Detect active X11 display
-              export DISPLAY="''${DISPLAY:-:0}"
-
-              # Verify SteamVR runtime exists
-              XR_RUNTIME_JSON_CANDIDATE="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
-              if [ -f "$XR_RUNTIME_JSON_CANDIDATE" ]; then
-                  export XR_RUNTIME_JSON="$XR_RUNTIME_JSON_CANDIDATE"
-              else
-                  echo "Warning: SteamVR runtime not found at $XR_RUNTIME_JSON_CANDIDATE"
-                  echo "VR headset may not be detected."
-              fi
+              export SIMULA_APP_DIR="'$out'/bin"
 
               if grep -qi NixOS /etc/os-release; then
                   echo "NixOS detected. Running Simula..."
+
+                  # Detect active X11 display
+                  export DISPLAY="''${DISPLAY:-:0}"
+
+                  # Verify SteamVR runtime exists
+                  XR_RUNTIME_JSON_CANDIDATE="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
+                  if [ -f "$XR_RUNTIME_JSON_CANDIDATE" ]; then
+                      export XR_RUNTIME_JSON="$XR_RUNTIME_JSON_CANDIDATE"
+                  else
+                      echo "Warning: SteamVR runtime not found at $XR_RUNTIME_JSON_CANDIDATE"
+                      echo "VR headset may not be detected."
+                  fi
+
                   export XKB_DEFAULT_LAYOUT="us"
                   export XKB_DEFAULT_VARIANT=""
                   export XKB_DEFAULT_OPTIONS=""
                   export XKB_CONFIG_ROOT="${pkgs.xorg.xkeyboardconfig}/share/X11/xkb"
-                  godot -m "'$out'"/opt/simula/project.godot
+
+                  godot -m "'$out'"/opt/simula/project.godot &
+                  GODOT_PID=$!
+
+                  # Set niceness + ionice only for godot, SteamVR, and ALVR
+                  set_niceness "$GODOT_PID"
+                  set_priority_for vrserver
+                  set_priority_for vrcompositor
+                  set_priority_for alvr
+
+                  wait "$GODOT_PID"
               else
                 echo "Detects non-NixOS distribution. Running Simula with nixGL..."
                 nix run --impure github:nix-community/nixGL -- godot -m "'$out'"/opt/simula/project.godot
@@ -420,6 +436,18 @@
                 export SIMULA_CONFIG_DIR="$XDG_CONFIG_HOME/Simula"
                 export SIMULA_APP_DIR="'$out'/bin"
 
+                set_niceness() {
+                  if command -v sudo >/dev/null 2>&1 && command -v renice >/dev/null 2>&1; then
+                    sudo renice -n -20 -p "$1" >/dev/null 2>&1 || true
+                  fi
+                  if command -v sudo >/dev/null 2>&1 && command -v ionice >/dev/null 2>&1; then
+                    sudo ionice -c 1 -n 0 -p "$1" >/dev/null 2>&1 || true
+                  fi
+                }
+                set_priority_for() {
+                  for pid in $(pgrep -x "$1" 2>/dev/null); do set_niceness "$pid"; done
+                }
+
                 # RTS flags for profiling - override via GHCRTS env var
                 export GHCRTS="''${GHCRTS:--hT -sstderr}"
 
@@ -438,7 +466,13 @@
                     export XKB_DEFAULT_VARIANT=""
                     export XKB_DEFAULT_OPTIONS=""
                     export XKB_CONFIG_ROOT="${pkgs.xorg.xkeyboardconfig}/share/X11/xkb"
-                    godot -m "'$out'"/opt/simula/project.godot
+                    godot -m "'$out'"/opt/simula/project.godot &
+                    GODOT_PID=$!
+                    set_niceness "$GODOT_PID"
+                    set_priority_for vrserver
+                    set_priority_for vrcompositor
+                    set_priority_for alvr
+                    wait "$GODOT_PID"
                 else
                   echo "Detects non-NixOS distribution. Running Simula with nixGL..."
                   nix run --impure github:nix-community/nixGL -- godot -m "'$out'"/opt/simula/project.godot
