@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# ALVR launcher with correct SteamVR launch path.
+#
+# The "Launch SteamVR" button in ALVR's dashboard calls
+# Command::new("steam").args(["steam://rungameid/250820"]).
+# The system `steam` at /etc/profiles/.../bin/steam is a bwrap wrapper
+# that cannot nest inside the ALVR bwrap sandbox — it fails with
+# "requires a 64 bit version of Windows".
+#
+# This wrapper injects a custom `steam` script that calls the real Steam
+# binary (~/.local/share/Steam/ubuntu12_32/steam) directly, bypassing
+# the bwrap layer entirely. The real Steam detects the already-running
+# host Steam instance via IPC and just forwards the URL.
+
+set -o errexit
+set -o nounset
+
+STEAM_WRAPPER_DIR="$HOME/.local/share/alvr-steam-shim"
+mkdir -p "$STEAM_WRAPPER_DIR"
+
+# Create a steam shim that calls the real Steam binary directly.
+# This avoids the nested bwrap that happens when using the system steam wrapper.
+cat > "$STEAM_WRAPPER_DIR/steam" << 'STEAMSHIM'
+#!/bin/sh
+# Steam shim for use inside the ALVR bwrap sandbox.
+# Calls the real Steam bootstrapper directly — no bwrap nesting.
+# The bootstrapper detects already-running Steam and forwards the URL via IPC.
+REAL_STEAM="$HOME/.local/share/Steam/ubuntu12_32/steam"
+if [ -x "$REAL_STEAM" ]; then
+    exec "$REAL_STEAM" "$@"
+fi
+# Fallback: try the steamrt64 version
+REAL_STEAM2="$HOME/.local/share/Steam/steamrt64/steam"
+if [ -x "$REAL_STEAM2" ]; then
+    exec "$REAL_STEAM2" "$@"
+fi
+# Last resort: try through steam.sh
+REAL_STEAM3="$HOME/.local/share/Steam/steam.sh"
+if [ -x "$REAL_STEAM3" ]; then
+    exec "$REAL_STEAM3" "$@"
+fi
+echo "ERROR: Steam binary not found" >&2
+exit 1
+STEAMSHIM
+chmod +x "$STEAM_WRAPPER_DIR/steam"
+
+# Prepend the shim directory to PATH so ALVR finds our steam first.
+# Inside the bwrap, the FHS profile prepends /run/wrappers/bin:/usr/bin:/usr/sbin,
+# but none of those have steam in the ALVR FHS, so our shim is found via $INHERITED_PATH.
+export PATH="$STEAM_WRAPPER_DIR:$PATH"
+
+exec /etc/profiles/per-user/$USER/bin/alvr "$@"
