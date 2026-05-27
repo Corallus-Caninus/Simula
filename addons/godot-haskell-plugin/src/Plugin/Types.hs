@@ -29,6 +29,7 @@ import           Text.Read (readMaybe)
 import           System.Environment (lookupEnv)
 import           Control.Concurrent
 import           Control.Concurrent.STM (registerDelay)
+import           Control.Concurrent.Async (concurrently)
 import           Control.Monad
 import           Data.Coerce
 import           Unsafe.Coerce
@@ -74,7 +75,6 @@ import Data.IORef
 import qualified Data.Map.Strict as M
 
 import Data.UUID
-import Data.UUID.V1 (nextUUID)
 import System.Process
 import System.Process.Internals
 import System.Posix.Types
@@ -309,16 +309,12 @@ data GodotSimulaServer = GodotSimulaServer
   , _gssLeapMotion              :: TVar GodotLeapMotion
   , _gssDampSensitivity         :: TVar DampSensitivity
   , _gssKeyboardModifiersActive :: TVar (Maybe Modifiers)
-  , _gssTerminalStateFile       :: TVar FilePath
-  , _gssTmuxSessionMap          :: TVar (M.Map Int TmuxSessionInfo)
-  , _gssDesktopExported         :: TVar Bool
-  , _gssPendingRestores         :: TVar [V3 Double]
   , _gssShuttingDown            :: TVar Bool
   }
 
 instance HasBaseClass GodotSimulaServer where
   type BaseClass GodotSimulaServer = GodotSpatial
-  super (GodotSimulaServer obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotSpatial obj
+  super (GodotSimulaServer obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotSpatial obj
 
 type SurfaceMap = OMap GodotWlrSurface CanvasSurface
 
@@ -423,72 +419,6 @@ data DampSensitivity = DampSensitivity {
   , _dsPinch       :: Float
 }
 
-data TmuxSessionInfo = TmuxSessionInfo
-  { _tsiSessionName   :: Text
-  , _tsiLocation      :: Maybe String
-  , _tsiPosition      :: V3 Double
-  , _tsiRotation      :: V3 Double
-  , _tsiDimensions    :: SpriteDimensions
-  , _tsiProcessID     :: Int
-  , _tsiKittyWindowId :: Maybe Text
-  , _tsiRestorePosition :: Maybe (V3 Double)
-  } deriving (Show, Generic)
-
-instance Aeson.ToJSON TmuxSessionInfo where
-  toJSON (TmuxSessionInfo sessionName location pos rot dims pid kittyWin restorePos) = Aeson.object
-    [ "sessionName"   Aeson..= sessionName
-    , "location"      Aeson..= location
-    , "position"      Aeson..= Aeson.object [ "x" Aeson..= (pos ^. _x), "y" Aeson..= (pos ^. _y), "z" Aeson..= (pos ^. _z) ]
-    , "rotation"      Aeson..= Aeson.object [ "x" Aeson..= (rot ^. _x), "y" Aeson..= (rot ^. _y), "z" Aeson..= (rot ^. _z) ]
-    , "dimensions"    Aeson..= dims
-    , "processID"     Aeson..= pid
-    , "kittyWindowId" Aeson..= kittyWin
-    , "restorePosition" Aeson..= (fmap (\rp -> Aeson.object [ "x" Aeson..= (rp ^. _x), "y" Aeson..= (rp ^. _y), "z" Aeson..= (rp ^. _z) ]) restorePos)
-    ]
-
-instance Aeson.FromJSON TmuxSessionInfo where
-  parseJSON = Aeson.withObject "TmuxSessionInfo" $ \v -> do
-    sessionName <- v Aeson..: "sessionName"
-    location <- v Aeson..: "location"
-    positionObj <- v Aeson..: "position"
-    rotationObj <- v Aeson..: "rotation"
-    let posX = positionObj Aeson..: "x"
-    let posY = positionObj Aeson..: "y"
-    let posZ = positionObj Aeson..: "z"
-    let rotx = rotationObj Aeson..: "x"
-    let roty = rotationObj Aeson..: "y"
-    let rotz = rotationObj Aeson..: "z"
-    pos <- V3 <$> posX <*> posY <*> posZ
-    rot <- V3 <$> rotx <*> roty <*> rotz
-    dims <- v Aeson..: "dimensions"
-    pid <- v Aeson..: "processID"
-    kittyWin <- v Aeson..: "kittyWindowId"
-    restorePos <- (v Aeson..:? "restorePosition") >>= \case
-      Nothing -> return Nothing
-      Just obj -> do
-        rx <- obj Aeson..: "x"
-        ry <- obj Aeson..: "y"
-        rz <- obj Aeson..: "z"
-        return $ Just (V3 rx ry rz)
-    return $ TmuxSessionInfo sessionName location pos rot dims pid kittyWin restorePos
-
-data TerminalState = TerminalState
-  { _tsSessions   :: [TmuxSessionInfo]
-  , _tsLastClosed :: Data.Time.Clock.UTCTime
-  } deriving (Show, Generic)
-
-instance Aeson.ToJSON TerminalState where
-  toJSON (TerminalState sessions lastClosed) = Aeson.object
-    [ "sessions"    Aeson..= sessions
-    , "lastClosed"  Aeson..= Data.Time.Format.ISO8601.iso8601Show lastClosed
-    ]
-
-instance Aeson.FromJSON TerminalState where
-  parseJSON = Aeson.withObject "TerminalState" $ \v -> TerminalState
-    <$> v Aeson..: "sessions"
-    <*> (v Aeson..: "lastClosed" >>= parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ")
-
-
 makeLenses ''GodotSimulaViewSprite
 makeLenses ''CanvasBase
 makeLenses ''CanvasSurface
@@ -502,8 +432,6 @@ makeLenses ''StartingApps
 makeLenses ''Configuration
 makeLenses ''HUD
 makeLenses ''HandTelekinesis
-makeLenses ''TmuxSessionInfo
-makeLenses ''TerminalState
 makeLenses ''GodotLeapMotion
 makeLenses ''LeapHand
 makeLenses ''DampSensitivity
@@ -525,8 +453,12 @@ connectGodotSignal sourceObj signalName methodObj methodName defaultArgs = do
   signalName'    <- (toLowLevel (pack signalName))  :: IO GodotString
   let methodObj' =  safeCast methodObj     :: GodotObject
   methodName'    <- (toLowLevel (pack methodName))  :: IO GodotString
-  defaultArgs'   <- (toLowLevel defaultArgs) :: IO GodotArray -- Wraps godot_array_new; do we have to clean this up via godot_array_destroy ?
-  G.connect sourceObj' signalName' methodObj' methodName' defaultArgs' 0
+  defaultArgs'   <- (toLowLevel defaultArgs) :: IO GodotArray -- Wraps godot_array_new; clean up after use
+  ret <- G.connect sourceObj' signalName' methodObj' methodName' defaultArgs' 0
+  Api.godot_string_destroy signalName'
+  Api.godot_string_destroy methodName'
+  Api.godot_array_destroy defaultArgs'
+  return ret
 
 addChild :: (GodotNode :< parent)
          => (GodotNode :< child)
@@ -1004,6 +936,7 @@ savePng cs surfaceTexture wlrSurface = do
   pathStr' <- toLowLevel (pack pathStr)
 
   G.save_png surfaceTextureAsImage pathStr'
+  Api.godot_object_destroy $ safeCast surfaceTextureAsImage
   return canonicalPath
 
 type ScreenshotBaseName = String
@@ -1021,6 +954,7 @@ savePngPancake gss screenshotBaseName = do
   let relativePath = (dataDir ++ "/media/" <> screenshotBaseName <> ".png")
   fullPath <- System.Directory.canonicalizePath relativePath
   G.save_png pancakeImg =<< toLowLevel (pack relativePath)
+  Api.godot_object_destroy $ safeCast pancakeImg
   return fullPath
 
 -- Run shell command with DISPLAY set to our XWayland server value (typically
@@ -1034,7 +968,7 @@ appLaunch gss appStr maybeLocation = do
   case (appStr, maybeXwaylandDisplay) of
     ("nullApp", _) -> return $ fromInteger 0
     ("launchHMDWebcam", _) -> launchHMDWebCam gss maybeLocation
-    ("launchTerminal", _) -> terminalLaunch gss maybeLocation Nothing
+    ("launchTerminal", _) -> terminalLaunch gss maybeLocation
     ("launchUsageInstructions", _) -> appLaunch gss "midori https://github.com/SimulaVR/Simula#usage -p" maybeLocation
     (_, Nothing) -> logPutStrLn "No DISPLAY found!" >> (return $ fromInteger 0)
     (_, (Just xwaylandDisplay)) -> do
@@ -1129,8 +1063,8 @@ launchHMDWebCam gss maybeLocation = do
                                                                        "Valve", -- Valve Index?
                                                                        "Etron"] -- Valve Index
                             
-terminalLaunch :: GodotSimulaServer -> Maybe String -> Maybe (V3 Double) -> IO ProcessID
-terminalLaunch gss maybeLocation maybeRestorePos = do
+terminalLaunch :: GodotSimulaServer -> Maybe String -> IO ProcessID
+terminalLaunch gss maybeLocation = do
   maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
   let appDir = fromMaybe "./result/bin" maybeAppDir
   terminalPath <- System.Directory.doesFileExist (appDir ++ "/kitty") >>= \case
@@ -1139,96 +1073,7 @@ terminalLaunch gss maybeLocation maybeRestorePos = do
   let fontArgs = if "kitty" `Data.List.isInfixOf` terminalPath
                  then " -o font_family=\"Fira Code\" -o background_opacity=1 -o background=#000000 -o foreground=#ffffff -o confirm_os_window_close=0"
                  else ""
-
-  sessionName <- pack <$> generateUniqueSessionName
-  logPutStrLn $ "Creating tmux session: " ++ unpack sessionName
-  tmuxPid <- createTmuxSession sessionName
-  logPutStrLn $ "Created tmux session with PID: " ++ show tmuxPid
-
-  atomically $ do
-    sessionMap <- readTVar (gss ^. gssTmuxSessionMap)
-    let sessionInfo = TmuxSessionInfo
-          { _tsiSessionName = sessionName
-          , _tsiLocation = maybeLocation
-          , _tsiPosition = V3 0 0 0
-          , _tsiRotation = V3 0 0 0
-          , _tsiDimensions = SpriteDimensions (1920, 1080)
-          , _tsiProcessID = fromIntegral tmuxPid
-          , _tsiKittyWindowId = Nothing
-          , _tsiRestorePosition = maybeRestorePos
-          }
-    writeTVar (gss ^. gssTmuxSessionMap) (M.insert (fromIntegral tmuxPid) sessionInfo sessionMap)
-
-  let tmuxCmd = "tmux attach -t " ++ unpack sessionName
-  appLaunch gss (terminalPath ++ fontArgs ++ " " ++ tmuxCmd) maybeLocation
-
-attachToExistingTmuxSession :: GodotSimulaServer -> TmuxSessionInfo -> Maybe String -> IO ProcessID
-attachToExistingTmuxSession gss session maybeLocation = do
-  let sessionName = _tsiSessionName session
-  maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
-  let appDir = fromMaybe "./result/bin" maybeAppDir
-  terminalPath <- System.Directory.doesFileExist (appDir ++ "/kitty") >>= \case
-    True -> return (appDir ++ "/kitty")
-    False -> return "kitty"
-  let fontArgs = if "kitty" `Data.List.isInfixOf` terminalPath
-                 then " -o font_family=\"Fira Code\" -o background_opacity=1 -o background=#000000 -o foreground=#ffffff -o confirm_os_window_close=0"
-                 else ""
-  let tmuxCmd = "tmux attach -t " ++ unpack sessionName
-  atomically $ do
-    sessionMap <- readTVar (gss ^. gssTmuxSessionMap)
-    let pid = _tsiProcessID session
-    writeTVar (gss ^. gssTmuxSessionMap) (M.insert pid session sessionMap)
-  appLaunch gss (terminalPath ++ fontArgs ++ " " ++ tmuxCmd) maybeLocation
-
-generateUniqueSessionName :: IO String
-generateUniqueSessionName = do
-  uuid <- nextUUID
-  return $ "simula-term-" ++ Data.Maybe.maybe "unknown" toString uuid
-
-createTmuxSession :: Text -> IO ProcessID
-createTmuxSession sessionName = do
-  let sessionStr = unpack sessionName
-  (_, _, _, handle) <- createProcess
-    (proc "tmux" ["new-session", "-d", "-s", sessionStr, "bash", "-i"])
-    { std_in = CreatePipe
-    , std_out = CreatePipe
-    , std_err = CreatePipe
-    }
-  maybePid <- System.Process.getPid handle
-  case maybePid of
-    Just pid -> return pid
-    Nothing -> do
-      logPutStrLn $ "Failed to get PID for tmux session: " ++ sessionStr
-      error $ "Failed to create tmux session: " ++ sessionStr
-
-tmuxSessionExists :: Text -> IO Bool
-tmuxSessionExists sessionName = do
-  let sessionStr = unpack sessionName
-  exitCode <- rawSystem "tmux" ["has-session", "-t", sessionStr]
-  return $ exitCode == ExitSuccess
-
-killTmuxSession :: Text -> IO ()
-killTmuxSession sessionName = do
-  let sessionStr = unpack sessionName
-  Control.Monad.void $ rawSystem "tmux" ["kill-session", "-t", sessionStr]
-
-updateTmuxSessionPosition :: GodotSimulaViewSprite -> IO ()
-updateTmuxSessionPosition gsvs = do
-  gss <- readTVarIO (gsvs ^. gsvsServer)
-  tmuxMap <- atomically $ readTVar (gss ^. gssTmuxSessionMap)
-  when (M.size tmuxMap > 0) $ do
-    (TF _ pos) <- G.get_global_transform gsvs >>= fromLowLevel
-    let posV3 = fmap realToFrac pos
-    dims <- readTVarIO (gsvs ^. gsvsTargetSize)
-    let dimsVal = Data.Maybe.fromMaybe (SpriteDimensions (1920, 1080)) dims
-    let updateSession info = info
-          { _tsiPosition = posV3
-          , _tsiDimensions = dimsVal
-          }
-    atomically $ do
-      sessionMap <- readTVar (gss ^. gssTmuxSessionMap)
-      let updatedMap = M.map updateSession sessionMap
-      writeTVar (gss ^. gssTmuxSessionMap) updatedMap
+  appLaunch gss (terminalPath ++ fontArgs) maybeLocation
 
 getTextureFromURL :: String -> IO (Maybe GodotTexture)
 getTextureFromURL urlStr = do
@@ -1505,6 +1350,8 @@ saveViewportAsPngAndLaunch gsvs tex m22@(V2 (V2 ox oy) (V2 ex ey)) = do
       rect <- toLowLevel m22
       rectImage <- G.get_rect texAsImage rect
       G.save_png rectImage pathStr'
+      Api.godot_object_destroy $ safeCast rectImage
+      Api.godot_object_destroy $ safeCast texAsImage
       gss <- readTVarIO (gsvs ^. gsvsServer)
 
       -- Copy to clipboard
@@ -1524,10 +1371,9 @@ getDepthFirstSurfaces gsvs = do
   simulaView <- readTVarIO (gsvs ^. gsvsView)
   let eitherSurface = (simulaView ^. svWlrEitherSurface)
   wlrSurfaceParent <- (getWlrSurface eitherSurface) >>= validateSurfaceE
-  depthFirstBaseSurfaces <- getDepthFirstBaseSurfaces gsvs
-  depthFirstWlrSurfaces <- getDepthFirstWlrSurfaces wlrSurfaceParent
-  let depthFirstSurfaces = depthFirstBaseSurfaces ++ depthFirstWlrSurfaces
-  return depthFirstSurfaces
+  (depthFirstBaseSurfaces, depthFirstWlrSurfaces) <-
+    concurrently (getDepthFirstBaseSurfaces gsvs) (getDepthFirstWlrSurfaces wlrSurfaceParent)
+  return $ depthFirstBaseSurfaces ++ depthFirstWlrSurfaces
 
 getDepthFirstBaseSurfaces :: GodotSimulaViewSprite -> IO [(GodotWlrSurface, Int, Int)]
 getDepthFirstBaseSurfaces gsvs = do
@@ -1555,17 +1401,20 @@ getDepthFirstXWaylandSurfaces :: GodotWlrXWaylandSurface -> IO [(GodotWlrSurface
 getDepthFirstXWaylandSurfaces wlrXWaylandSurface = do
   xwaylandMappedChildrenAndCoords <- getXWaylandMappedChildren wlrXWaylandSurface :: IO [(GodotWlrXWaylandSurface, Int, Int)]
   wlrSurface <- G.get_wlr_surface wlrXWaylandSurface :: IO GodotWlrSurface
-  foldM appendXWaylandSurfaceAndChildren [(wlrSurface, 0, 0)] xwaylandMappedChildrenAndCoords
+  children <- Prelude.concat <$> mapM processXWaylandChild xwaylandMappedChildrenAndCoords
+  return $ (wlrSurface, 0, 0) : children
   where
-        appendXWaylandSurfaceAndChildren :: [(GodotWlrSurface, Int, Int)] -> (GodotWlrXWaylandSurface, Int, Int) -> IO [(GodotWlrSurface, Int, Int)]
-        appendXWaylandSurfaceAndChildren oldList arg@(wlrXWaylandSurface, x, y) = do
+        processXWaylandChild :: (GodotWlrXWaylandSurface, Int, Int) -> IO [(GodotWlrSurface, Int, Int)]
+        processXWaylandChild (wlrXWaylandSurface, x, y) = do
            xwaylandChildSurface <- G.get_wlr_surface wlrXWaylandSurface :: IO GodotWlrSurface
-           appendSurfaceAndChildren oldList (xwaylandChildSurface, x, y)
+           go (xwaylandChildSurface, x, y)
 
-        appendSurfaceAndChildren :: [(GodotWlrSurface, Int, Int)] -> (GodotWlrSurface, Int, Int) -> IO [(GodotWlrSurface, Int, Int)]
-        appendSurfaceAndChildren oldList arg@(wlrSurface, x, y) = do
+        go :: (GodotWlrSurface, Int, Int) -> IO [(GodotWlrSurface, Int, Int)]
+        go (wlrSurface, x, y) = do
            subsurfacesAndCoords <- getSurfaceChildren wlrSurface :: IO [(GodotWlrSurface, Int, Int)]
-           foldM appendSurfaceAndChildren (oldList ++ [(wlrSurface, x, y)]) subsurfacesAndCoords
+           let this = [(wlrSurface, x, y)]
+           children <- Prelude.concat <$> mapM go subsurfacesAndCoords
+           return $ this ++ children
 
         getSurfaceChildren :: GodotWlrSurface -> IO [(GodotWlrSurface, Int, Int)]
         getSurfaceChildren wlrSurface = do
@@ -1597,12 +1446,16 @@ getDepthFirstXWaylandSurfaces wlrXWaylandSurface = do
 getDepthFirstXdgSurfaces :: GodotWlrXdgSurface -> IO [(GodotWlrSurface, Int, Int)]
 getDepthFirstXdgSurfaces wlrXdgSurface = do
   xdgPopups <- getXdgPopups wlrXdgSurface :: IO [(GodotWlrXdgSurface, Int, Int)]
-  depthFirstXdgSurfaces  <- foldM appendXdgSurfaceAndChildren [(wlrXdgSurface, 0, 0)] xdgPopups
-  mapM convertToWlrSurfaceDepthFirstSurfaces depthFirstXdgSurfaces
-  where convertToWlrSurfaceDepthFirstSurfaces :: (GodotWlrXdgSurface, Int, Int) -> IO (GodotWlrSurface, Int, Int)
-        convertToWlrSurfaceDepthFirstSurfaces (wlrXdgSurface, x, y) = do
+  wlrSurface <- G.get_wlr_surface wlrXdgSurface
+  children <- Prelude.concat <$> mapM processXdgChild xdgPopups
+  return $ (wlrSurface, 0, 0) : children
+  where
+        processXdgChild :: (GodotWlrXdgSurface, Int, Int) -> IO [(GodotWlrSurface, Int, Int)]
+        processXdgChild (wlrXdgSurface, x, y) = do
           wlrSurface <- G.get_wlr_surface wlrXdgSurface
-          return (wlrSurface, x, y)
+          subsurfacesAndCoords <- getXdgPopups wlrXdgSurface :: IO [(GodotWlrXdgSurface, Int, Int)]
+          children <- Prelude.concat <$> mapM processXdgChild subsurfacesAndCoords
+          return $ (wlrSurface, x, y) : children
 
         getXdgPopups :: GodotWlrXdgSurface -> IO [(GodotWlrXdgSurface, Int, Int)]
         getXdgPopups wlrXdgSurface = do
@@ -1618,19 +1471,16 @@ getDepthFirstXdgSurfaces wlrXdgSurface = do
           mapM_ Api.godot_variant_destroy arrayOfChildrenGV
           return childrenWithCoords
 
-        appendXdgSurfaceAndChildren :: [(GodotWlrXdgSurface, Int, Int)] -> (GodotWlrXdgSurface, Int, Int) -> IO [(GodotWlrXdgSurface, Int, Int)]
-        appendXdgSurfaceAndChildren oldList arg@(wlrXdgSurface, x, y) = do
-          subsurfacesAndCoords <- getXdgPopups wlrXdgSurface :: IO [(GodotWlrXdgSurface, Int, Int)]
-          foldM appendXdgSurfaceAndChildren (oldList ++ [(wlrXdgSurface, x, y)]) subsurfacesAndCoords
-
 getDepthFirstWlrSurfaces :: GodotWlrSurface -> IO [(GodotWlrSurface, Int, Int)]
 getDepthFirstWlrSurfaces wlrSurface = do
   surfaceChildrenAndCoords <- getSurfaceChildren wlrSurface
-  foldM appendSurfaceAndChildren [] surfaceChildrenAndCoords
-  where appendSurfaceAndChildren :: [(GodotWlrSurface, Int, Int)] -> (GodotWlrSurface, Int, Int) -> IO [(GodotWlrSurface, Int, Int)]
-        appendSurfaceAndChildren oldList arg@(wlrSurface, x, y) = do
+  Prelude.concat <$> mapM go surfaceChildrenAndCoords
+  where go :: (GodotWlrSurface, Int, Int) -> IO [(GodotWlrSurface, Int, Int)]
+        go (wlrSurface, x, y) = do
           surfacesAndCoords <- getSurfaceChildren wlrSurface :: IO [(GodotWlrSurface, Int, Int)]
-          foldM appendSurfaceAndChildren (oldList ++ [(wlrSurface, x, y)]) surfacesAndCoords
+          let this = [(wlrSurface, x, y)]
+          children <- Prelude.concat <$> mapM go surfacesAndCoords
+          return $ this ++ children
 
         getSurfaceChildren :: GodotWlrSurface -> IO [(GodotWlrSurface, Int, Int)]
         getSurfaceChildren wlrSurface = do

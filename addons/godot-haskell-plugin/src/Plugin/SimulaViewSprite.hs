@@ -11,7 +11,7 @@
 module Plugin.SimulaViewSprite where
 
 import Data.Text
-import Control.Exception (catch, SomeException)
+import Control.Exception (catch, try, SomeException)
 import Data.Proxy
 
 import Data.Colour
@@ -124,46 +124,22 @@ updateSimulaViewSprite gsvs = do
       simulaView <- readTVarIO (gsvs ^. gsvsView) --
       let eitherSurface = (simulaView ^. svWlrEitherSurface)
       gss <- readTVarIO (gsvs ^. gsvsServer)
-      
-      maybeRestorePos <- atomically $ do
-        pending <- readTVar (gss ^. gssPendingRestores)
-        case pending of
-          (pos:rest) -> do
-            writeTVar (gss ^. gssPendingRestores) rest
-            return (Just pos)
-          [] -> return Nothing
-      
-      case maybeRestorePos of
-        Just restorePos -> do
-          logPutStrLn $ "Applying restore position: " ++ show restorePos
-          meshInstance <- atomically $ readTVar (gsvs ^. gsvsMeshInstance)
-          aabb <- G.get_aabb meshInstance
-          size <- godot_aabb_get_size aabb
-          sizeV3 <- fromLowLevel size
-          let halfSize = sizeV3 ^/ 2
-          let restorePosFloat = fmap realToFrac restorePos
-          let finalPos = restorePosFloat ^+^ V3 0 (halfSize ^. _y) 0
-          transform <- G.get_global_transform gsvs >>= fromLowLevel
-          let (TF basis _) = transform
-          newTransform <- toLowLevel (TF basis finalPos)
-          G.set_global_transform gsvs newTransform
-          atomically $ writeTVar (_gsvsShouldMove gsvs) False
-        Nothing -> do
-          pid <- case eitherSurface of
-                      Left wlrXdgSurface -> do
-                        wlrXdgSurface <- validateSurfaceE wlrXdgSurface
-                        pidInt <- G.get_pid wlrXdgSurface
-                        return $ (fromInteger $ fromIntegral pidInt)
-                      Right wlrXWaylandSurface -> do
-                        wlrXWaylandSurface <- validateSurfaceE wlrXWaylandSurface
-                        pidInt <- G.get_pid wlrXWaylandSurface
-                        return $ (fromInteger $ fromIntegral pidInt)
-          pids <- (pid:) <$> getParentsPids pid
-          maybeLocation <- getSimulaStartingLocationAtomically gss pids
-          case maybeLocation of
-            Just location -> moveToStartingPosition gsvs location
-            Nothing -> return ()
-          atomically $ writeTVar (_gsvsShouldMove gsvs) False
+
+      pid <- case eitherSurface of
+                  Left wlrXdgSurface -> do
+                    wlrXdgSurface <- validateSurfaceE wlrXdgSurface
+                    pidInt <- G.get_pid wlrXdgSurface
+                    return $ (fromInteger $ fromIntegral pidInt)
+                  Right wlrXWaylandSurface -> do
+                    wlrXWaylandSurface <- validateSurfaceE wlrXWaylandSurface
+                    pidInt <- G.get_pid wlrXWaylandSurface
+                    return $ (fromInteger $ fromIntegral pidInt)
+      pids <- (pid:) <$> getParentsPids pid
+      maybeLocation <- getSimulaStartingLocationAtomically gss pids
+      case maybeLocation of
+        Just location -> moveToStartingPosition gsvs location
+        Nothing -> return ()
+      atomically $ writeTVar (_gsvsShouldMove gsvs) False
   where -- Necessary for window manipulation to function
         setBoxShapeExtentsToMatchAABB :: GodotSimulaViewSprite -> IO ()
         setBoxShapeExtentsToMatchAABB gsvs = do
@@ -389,16 +365,50 @@ newGodotSimulaViewSprite gss simulaView = do
 
   return gsvs
 
+-- | Reset potentially stuck modifier keys in the wlrKeyboard's internal state.
+-- When keyboard focus is lost (e.g., a popup window steals it), modifier release
+-- events may be consumed by the other window.  On re-focus, keyboard_notify_enter
+-- sends the stale modifier state to the surface, producing control characters
+-- (^t, ^n, etc.) for normal keystrokes.
+-- We inject release events for all common modifiers, then notify the seat.
+resetStuckModifiers :: GodotWlrKeyboard -> GodotWlrSeat -> IO ()
+resetStuckModifiers wlrKeyboard wlrSeat = do
+  -- Godot scancodes for common modifier keys
+  let modKeys = [ KEY_CONTROL_L, KEY_CONTROL_R
+                , KEY_ALT_L,     KEY_ALT_R
+                , KEY_SHIFT_L,   KEY_SHIFT_R
+                , KEY_META_L,    KEY_META_R
+                ]
+  mapM_ (\kc -> G.send_wlr_event_keyboard_key wlrKeyboard kc False) modKeys
+  G.keyboard_notify_modifiers wlrSeat
+
 focus :: GodotSimulaViewSprite -> IO ()
 focus gsvs = do
   simulaView  <- atomically $ readTVar (gsvs ^. gsvsView)
   gss         <- atomically $ readTVar (gsvs ^. gsvsServer)
   wlrSeat     <- atomically $ readTVar (gss ^. gssWlrSeat)
+  wlrKeyboard <- atomically $ readTVar (gss ^. gssWlrKeyboard)
   let wlrEitherSurface = (simulaView ^. svWlrEitherSurface)
 
   atomically $ writeTVar (gss ^. gssKeyboardFocusedSprite) (Just gsvs)
   atomically $ writeTVar (gss ^. gssActiveCursorGSVS) (Just gsvs)
+  atomically $ writeTVar (gss ^. gssKeyboardModifiersActive) Nothing
 
+  -- Clear any stale modifier state before transferring keyboard focus.
+  resetStuckModifiers wlrKeyboard wlrSeat
+
+  -- Catch exceptions during surface focus to prevent crashes from destroyed
+  -- surfaces (e.g., when the Simula window is minimized and re-focused).
+  result <- try (focusSurface wlrSeat wlrEitherSurface gsvs) :: IO (Either SomeException ())
+  case result of
+    Left e  -> logPutStrLn $ "focus: caught " ++ show e
+    Right _ -> return ()
+
+-- | Internal: perform the wlr surface focus after state has been prepared.
+-- Extracted so the calling code can catch exceptions without catching the
+-- STM/IO prep above.
+focusSurface :: GodotWlrSeat -> Either GodotWlrXdgSurface GodotWlrXWaylandSurface -> GodotSimulaViewSprite -> IO ()
+focusSurface wlrSeat wlrEitherSurface gsvs =
   case wlrEitherSurface of
     Left wlrXdgSurface -> do validateSurfaceE wlrXdgSurface
                              wlrSurface  <- (G.get_wlr_surface wlrXdgSurface) >>= validateSurfaceE
@@ -407,6 +417,7 @@ focus gsvs = do
                              -- isGodotTypeNull wlrSurface
                              G.set_activated toplevel True
                              G.keyboard_notify_enter wlrSeat wlrSurface
+                             G.keyboard_notify_modifiers wlrSeat
                              pointerNotifyEnter wlrSeat wlrSurface (SubSurfaceLocalCoordinates (0,0))
                              pointerNotifyFrame wlrSeat
     Right wlrXWaylandSurface -> do validateSurfaceE wlrXWaylandSurface
@@ -414,6 +425,7 @@ focus gsvs = do
                                    G.reference wlrSurface
                                    safeSetActivated gsvs True -- G.set_activated wlrXWaylandSurface True
                                    G.keyboard_notify_enter wlrSeat wlrSurface
+                                   G.keyboard_notify_modifiers wlrSeat
                                    pointerNotifyEnter wlrSeat wlrSurface (SubSurfaceLocalCoordinates (0,0))
                                    pointerNotifyFrame wlrSeat
 
@@ -533,11 +545,16 @@ _handle_map gsvs _ = do
 
   putStr "Mapping surface "
   print (safeCast @GodotObject gsvs)
-  -- Add the gsvs as a child to the current workspace
+  -- Add the gsvs as a child to the current workspace if it isn't already
   (workspace, workspaceStr) <- readTVarIO (gss ^. gssWorkspace)
-  G.add_child ((safeCast workspace) :: GodotNode)
-              ((safeCast gsvs)      :: GodotNode)
-              True
+  hasParent <- G.is_a_parent_of ((safeCast workspace) :: GodotNode)
+                                ((safeCast gsvs) :: GodotNode)
+  if not hasParent then
+    G.add_child ((safeCast workspace) :: GodotNode)
+                ((safeCast gsvs)      :: GodotNode)
+                True
+  else
+    return ()
 
   cb <- newCanvasBase gsvs
   viewportBase <- readTVarIO (cb ^. cbViewport)
@@ -580,7 +597,6 @@ _process self _ = do
       if isAtTargetDimsNow then (atomically $ writeTVar (self ^. gsvsIsAtTargetDims) True) else (return ())
     (True, True) -> do
       updateSimulaViewSprite self
-      updateTmuxSessionPosition self
     _ -> return ()
   return ()
   where isAtTargetDimensions :: GodotSimulaViewSprite -> IO Bool
@@ -1013,12 +1029,14 @@ handle_unmap_base self [wlrXWaylandSurfaceVariant] = do
   G.set_process self False
   atomically $ writeTVar (simulaView ^. svMapped) False
   logPutStrLn "handle_unmap_base: check scene graph"
-  isInSceneGraph <- G.is_a_parent_of ((safeCast gss) :: GodotNode ) ((safeCast self) :: GodotNode)
+  -- gsvs is a direct child of workspace, not gss, so check workspace parent
+  (workspace, _) <- readTVarIO (gss ^. gssWorkspace)
+  isInSceneGraph <- G.is_a_parent_of ((safeCast workspace) :: GodotNode) ((safeCast self) :: GodotNode)
   atomically $ writeTVar (self ^. gsvsIsDamaged) True
   case isInSceneGraph of
        True -> do
          logPutStrLn "handle_unmap_base: remove_child"
-         removeChild gss self
+         removeChild workspace self
        False -> return ()
   logPutStrLn "handle_unmap_base end"
 

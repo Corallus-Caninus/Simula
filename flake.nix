@@ -42,6 +42,7 @@
             buildInputs = [
               # godot-haskell-plugin dependencies
               pkgs.haskellPackages.QuickCheck
+              pkgs.haskellPackages.async
               pkgs.haskellPackages.base64-bytestring
               pkgs.haskellPackages.clock
               pkgs.haskellPackages.dhall

@@ -25,6 +25,7 @@ haskellPackages.mkDerivation {
     haskellPackages.base
     haskellPackages.QuickCheck
     haskellPackages.aeson
+    haskellPackages.async
     haskellPackages.base64-bytestring
     haskellPackages.clock
     haskellPackages.colour

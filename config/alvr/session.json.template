@@ -1065,7 +1065,8 @@
       "driver_launch_action": {
         "variant": "UnregisterOtherDriversAtStartup"
       },
-      "open_close_steamvr_with_dashboard": false
+      "open_close_steamvr_with_dashboard": false,
+      "direct_launch": false
     },
     "capture": {
       "gui_collapsed": false,

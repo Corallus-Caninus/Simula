@@ -48,7 +48,6 @@ import Plugin.Input
 import Plugin.SimulaViewSprite
 import Plugin.Types
 import Plugin.Debug
-import Plugin.TerminalState
 
 import Control.Monad
 import Control.Concurrent
@@ -101,7 +100,7 @@ getKeyboardAction gss keyboardShortcut =
     "clickRight" -> rightClick
     "scrollUp" -> scrollUp gss
     "scrollDown" -> scrollDown gss
-    "launchTerminal" -> \_ isPressed -> when isPressed $ (terminalLaunch gss (Just "center") Nothing >> return ())
+    "launchTerminal" -> \_ isPressed -> when isPressed $ (terminalLaunch gss (Just "center") >> return ())
     "launchXrpa" -> launchXpra' gss
     "toggleGrabMode" -> toggleGrabMode'
     "launchHMDWebCam" -> launchHMDWebCam' gss
@@ -488,25 +487,11 @@ getKeyboardAction gss keyboardShortcut =
         terminateSimula :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         terminateSimula gss _ True = do
           atomically $ writeTVar (gss ^. gssShuttingDown) True
-          logPutStrLn "Saving terminal state..."
-          saveAndExportTerminalState gss
           logPutStrLn "Terminating Simula.."
           sceneTree <- G.get_tree gss
           G.quit sceneTree (-1)
           return ()
         terminateSimula _ _ _ = return ()
-
-        saveAndExportTerminalState :: GodotSimulaServer -> IO ()
-        saveAndExportTerminalState gss = do
-          tmuxMap <- atomically $ readTVar (gss ^. gssTmuxSessionMap)
-          currentTime <- Data.Time.Clock.getCurrentTime
-          let terminalState = TerminalState
-                { _tsSessions = M.elems tmuxMap
-                , _tsLastClosed = currentTime
-                }
-          saveTerminalState terminalState
-          exportTerminalsToDesktop terminalState
-          atomically $ writeTVar (gss ^. gssDesktopExported) True
 
         cycleEnvironment :: GodotSimulaServer -> SpriteLocation -> Bool -> IO ()
         cycleEnvironment gss _ True = do
@@ -839,40 +824,21 @@ ready gss _ = do
 
   -- Launch default apps (with polling instead of threadDelay)
   sApps <- readTVarIO (gss ^. gssStartingApps)
-  
-  maybeTerminalState <- loadTerminalState
-  case maybeTerminalState of
-    Just state -> do
-      logPutStrLn "Found saved terminal state, restoring sessions..."
-      _ <- forkIO $ do
-        let waitForXwayland 0 = logPutStrLn "XWayland never became ready, giving up on terminal restore."
-            waitForXwayland n = do
-              exists <- System.Directory.doesFileExist "/run/user/1000/simula-0"
-              if exists
-                then do
-                  logPutStrLn "XWayland ready, restoring terminal sessions."
-                  importTerminalsFromDesktop
-                  restoreTerminalSessions gss state
-                else do
-                  threadDelay 10000
-                  waitForXwayland (n - 1)
-        waitForXwayland 1000
-      logPutStrLn $ "Queued terminal restore"
-    Nothing -> do
-      logPutStrLn "No saved terminal state, will launch default apps"
-      _ <- forkIO $ do
-        let waitForXwayland 0 = logPutStrLn "XWayland never became ready, giving up on default apps."
-            waitForXwayland n = do
-              exists <- System.Directory.doesFileExist "/run/user/1000/simula-0"
-              if exists
-                then do
-                  logPutStrLn "XWayland ready, launching default apps."
-                  launchDefaultApps sApps "center"
-                else do
-                  threadDelay 10000
-                  waitForXwayland (n - 1)
-        waitForXwayland 1000
-      logPutStrLn $ "Queued default apps launch: " ++ (show sApps)
+
+  logPutStrLn "No saved terminal state, will launch default apps"
+  _ <- forkIO $ do
+    let waitForXwayland 0 = logPutStrLn "XWayland never became ready, giving up on default apps."
+        waitForXwayland n = do
+          exists <- System.Directory.doesFileExist "/run/user/1000/simula-0"
+          if exists
+            then do
+              logPutStrLn "XWayland ready, launching default apps."
+              launchDefaultApps sApps "center"
+            else do
+              threadDelay 10000
+              waitForXwayland (n - 1)
+    waitForXwayland 1000
+  logPutStrLn $ "Queued default apps launch: " ++ (show sApps)
 
   case debugModeMaybe of
     Nothing -> return ()
@@ -1164,10 +1130,6 @@ initGodotSimulaServer obj = do
 
       gssGrab' <- newTVarIO Nothing
 
-      gssTerminalStateFile' <- newTVarIO "" :: IO (TVar FilePath)
-      gssTmuxSessionMap' <- newTVarIO M.empty :: IO (TVar (M.Map Int TmuxSessionInfo))
-      gssDesktopExported' <- newTVarIO False :: IO (TVar Bool)
-      gssPendingRestores' <- newTVarIO [] :: IO (TVar [V3 Double])
       gssShuttingDown' <- newTVarIO False :: IO (TVar Bool)
 
       gssWorkspaces' <- V.replicateM 10 (unsafeInstance GodotSpatial "Spatial")
@@ -1282,10 +1244,6 @@ initGodotSimulaServer obj = do
       , _gssLeapMotion            = gssLeapMotion'            :: TVar GodotLeapMotion
       , _gssDampSensitivity       = gssDampSensitivity'       :: TVar DampSensitivity
       , _gssKeyboardModifiersActive = gssKeyboardModifiersActive' :: TVar (Maybe Modifiers)
-      , _gssTerminalStateFile       = gssTerminalStateFile'       :: TVar FilePath
-      , _gssTmuxSessionMap          = gssTmuxSessionMap'          :: TVar (M.Map Int TmuxSessionInfo)
-      , _gssDesktopExported         = gssDesktopExported'         :: TVar Bool
-      , _gssPendingRestores         = gssPendingRestores'         :: TVar [V3 Double]
       , _gssShuttingDown            = gssShuttingDown'            :: TVar Bool
       }
   return gss
@@ -1362,7 +1320,6 @@ _on_wlr_key gss [keyboardGVar, eventGVar] = do
   if shuttingDown then return () else do
     event <- fromGodotVariant eventGVar :: IO GodotWlrEventKeyboardKey
     wlrSeat <- readTVarIO (gss ^. gssWlrSeat)
-    G.reference event
     G.keyboard_notify_key wlrSeat event
 
 _on_wlr_modifiers :: GodotSimulaServer -> [GodotVariant] -> IO ()
@@ -1574,7 +1531,7 @@ shellCmd1 gss appStr = do
   let originalEnv = (gss ^. gssOriginalEnv)
   maybeAppDir <- lookupEnv "SIMULA_APP_DIR"
   let appDir = fromMaybe "./result/bin" maybeAppDir
-  createProcess (shell (appDir ++ "/" ++ appStr)) { env = Just originalEnv }
+  _ <- createProcess (shell (appDir ++ "/" ++ appStr)) { env = Just originalEnv }
   return ()
 
 _on_simula_shortcut :: GodotSimulaServer -> [GodotVariant] -> IO ()
