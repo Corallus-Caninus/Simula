@@ -1,3 +1,5 @@
+{-# LANGUAGE RankNTypes             #-}
+{-# LANGUAGE BlockArguments         #-}
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -79,7 +81,7 @@ import System.Process
 import System.Process.Internals
 import System.Posix.Types
 import GHC.IO.Handle
-import System.IO (openFile, IOMode(AppendMode), hSetBuffering, BufferMode(LineBuffering), hPutStrLn, hFlush)
+import System.IO (Handle, openFile, IOMode(AppendMode, WriteMode), hSetBuffering, BufferMode(LineBuffering, NoBuffering), hPutStrLn, hFlush)
 import System.Exit (ExitCode(..))
 import qualified Data.Aeson as Aeson
 
@@ -310,11 +312,12 @@ data GodotSimulaServer = GodotSimulaServer
   , _gssDampSensitivity         :: TVar DampSensitivity
   , _gssKeyboardModifiersActive :: TVar (Maybe Modifiers)
   , _gssShuttingDown            :: TVar Bool
+  , _gssMemCounters             :: TVar MemCounters
   }
 
 instance HasBaseClass GodotSimulaServer where
   type BaseClass GodotSimulaServer = GodotSpatial
-  super (GodotSimulaServer obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotSpatial obj
+  super (GodotSimulaServer obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotSpatial obj
 
 type SurfaceMap = OMap GodotWlrSurface CanvasSurface
 
@@ -418,6 +421,31 @@ data DampSensitivity = DampSensitivity {
   , _dsTranslation :: Float
   , _dsPinch       :: Float
 }
+
+data MemCounters = MemCounters
+  { _mcTextureAllocs   :: !Int
+  , _mcTextureFrees    :: !Int
+  , _mcImageAllocs     :: !Int
+  , _mcImageFrees      :: !Int
+  , _mcStringAllocs    :: !Int
+  , _mcStringFrees     :: !Int
+  , _mcViewportAllocs  :: !Int
+  , _mcViewportFrees   :: !Int
+  , _mcSpriteCreates   :: !Int
+  , _mcSpriteDestroys  :: !Int
+  , _mcSurfaceMaps     :: !Int
+  , _mcSurfaceUnmaps   :: !Int
+  , _mcDrawCalls       :: !Int
+  , _mcAppLaunches     :: !Int
+  , _mcAppExits        :: !Int
+  , _mcWlrBufferCommits :: !Int
+  }
+  deriving (Show)
+
+emptyMemCounters :: MemCounters
+emptyMemCounters = MemCounters 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+
+makeLenses ''MemCounters
 
 makeLenses ''GodotSimulaViewSprite
 makeLenses ''CanvasBase
@@ -865,6 +893,8 @@ initializeRenderTarget gsvs viewportType = do
   let eitherSurface = (simulaView ^. svWlrEitherSurface)
   wlrSurface <- getWlrSurface eitherSurface
   renderTarget <- unsafeInstance GodotViewport "Viewport"
+  gss <- readTVarIO (gsvs ^. gsvsServer)
+  incMemCounter gss mcViewportAllocs
   dimensions@(width, height) <- getBufferDimensions wlrSurface
   pixelDimensionsOfWlrSurface <- toGodotVector2 dimensions
 
@@ -925,7 +955,9 @@ savePng :: CanvasSurface -> GodotViewportTexture -> GodotWlrSurface -> IO String
 savePng cs surfaceTexture wlrSurface = do
   validateSurfaceE wlrSurface
   gsvs <- readTVarIO (cs ^. csGSVS)
+  gss <- readTVarIO (gsvs ^. gsvsServer)
   surfaceTextureAsImage <- G.get_data surfaceTexture
+  incMemCounter gss mcImageAllocs
 
   frame <- readTVarIO (gsvs ^. gsvsFrameCount)
   maybeDataDir <- lookupEnv "SIMULA_DATA_DIR"
@@ -937,6 +969,7 @@ savePng cs surfaceTexture wlrSurface = do
 
   G.save_png surfaceTextureAsImage pathStr'
   Api.godot_object_destroy $ safeCast surfaceTextureAsImage
+  incMemCounter gss mcImageFrees
   return canonicalPath
 
 type ScreenshotBaseName = String
@@ -946,7 +979,9 @@ savePngPancake :: GodotSimulaServer -> ScreenshotBaseName -> IO (ScreenshotFullP
 savePngPancake gss screenshotBaseName = do
   viewport <- G.get_viewport gss :: IO GodotViewport
   viewportTexture <- G.get_texture viewport
+  incMemCounter gss mcTextureAllocs
   pancakeImg <- G.get_data viewportTexture
+  incMemCounter gss mcImageAllocs
   G.flip_y pancakeImg
   maybeDataDir <- lookupEnv "SIMULA_DATA_DIR"
   let dataDir = fromMaybe "." maybeDataDir
@@ -955,6 +990,7 @@ savePngPancake gss screenshotBaseName = do
   fullPath <- System.Directory.canonicalizePath relativePath
   G.save_png pancakeImg =<< toLowLevel (pack relativePath)
   Api.godot_object_destroy $ safeCast pancakeImg
+  incMemCounter gss mcImageFrees
   return fullPath
 
 -- Run shell command with DISPLAY set to our XWayland server value (typically
@@ -1027,11 +1063,14 @@ appLaunch gss appStr maybeLocation = do
                     case maybePid of
                       Just pid -> do
                         logPutStrLn $ "appLaunch: started " ++ appStr ++ " with pid " ++ show pid
+                        incMemCounter gss mcAppLaunches
                         forkIO $ do
                           res <- Control.Exception.Safe.try $ waitForProcess processHandle :: IO (Either IOException ExitCode)
                           case res of
                             Left e -> logPutStrLn $ "appLaunch: exception waiting for process " ++ appStr ++ " (pid " ++ show pid ++ "): " ++ show e
-                            Right exitCode -> logPutStrLn $ "appLaunch: process " ++ appStr ++ " (pid " ++ show pid ++ ") exited with " ++ show exitCode
+                            Right exitCode -> do
+                              logPutStrLn $ "appLaunch: process " ++ appStr ++ " (pid " ++ show pid ++ ") exited with " ++ show exitCode
+                              incMemCounter gss mcAppExits
                         return pid
                       Nothing -> return $ fromInteger $ 0
       startingAppPids <- readTVarIO (gss ^. gssStartingAppPids)
@@ -1335,8 +1374,10 @@ saveViewportAsPngAndLaunch gsvs tex m22@(V2 (V2 ox oy) (V2 ex ey)) = do
   case isNull of
     True -> logPutStrLn "Texture is null in saveViewportAsPngAndLaunch!"
     False -> do
+      gss <- readTVarIO (gsvs ^. gsvsServer)
       -- Get image
       texAsImage <- G.get_data tex
+      incMemCounter gss mcImageAllocs
 
       -- Get file path
       timeStampStr <- show <$> getCurrentTime
@@ -1349,9 +1390,12 @@ saveViewportAsPngAndLaunch gsvs tex m22@(V2 (V2 ox oy) (V2 ex ey)) = do
       -- Save as png
       rect <- toLowLevel m22
       rectImage <- G.get_rect texAsImage rect
+      incMemCounter gss mcImageAllocs
       G.save_png rectImage pathStr'
       Api.godot_object_destroy $ safeCast rectImage
+      incMemCounter gss mcImageFrees
       Api.godot_object_destroy $ safeCast texAsImage
+      incMemCounter gss mcImageFrees
       gss <- readTVarIO (gsvs ^. gsvsServer)
 
       -- Copy to clipboard
@@ -1886,6 +1930,99 @@ logMemPid gss = do
   case maybeMem of
     Just pidMem -> return (pidMem / 1000)
     Nothing -> return 0.0 -- return ~MB
+
+incMemCounter gss lens = atomically $ modifyTVar' (gss ^. gssMemCounters) (Control.Lens.over lens (+1))
+
+logMemSnapshot h gss prev cur = do
+  time <- getCurrentTime
+  let pid = gss ^. gssPid
+  (_, out', _) <- System.Process.readCreateProcessWithExitCode (shell $ "ps -p " ++ pid ++ " -o rss=,vsz= --no-headers") ""
+  let rssVsZ = Prelude.words out'
+  let rssMb = case rssVsZ of
+                (rssStr:_) -> case readMaybe rssStr of Just r -> r / 1000; Nothing -> 0.0
+                _ -> 0.0
+  let vszMb = case rssVsZ of
+                (_:vszStr:_) -> case readMaybe vszStr of Just v -> v / 1000; Nothing -> 0.0
+                _ -> 0.0
+  staticMem <- try (getSingleton Godot_OS "OS" >>= G.get_static_memory_usage) :: IO (Either SomeException Int)
+  let staticMemMb = case staticMem of
+        Right bytes -> fromIntegral bytes / (1024 * 1024)
+        Left e -> 0.0
+  case staticMem of
+    Left e -> logStr $ "MEMTRACE get_static_memory_usage failed: " ++ show e
+    Right _ -> return ()
+  let delta = MemCounters
+        { _mcTextureAllocs  = _mcTextureAllocs cur  - _mcTextureAllocs prev
+        , _mcTextureFrees   = _mcTextureFrees cur   - _mcTextureFrees prev
+        , _mcImageAllocs    = _mcImageAllocs cur    - _mcImageAllocs prev
+        , _mcImageFrees     = _mcImageFrees cur     - _mcImageFrees prev
+        , _mcStringAllocs   = _mcStringAllocs cur   - _mcStringAllocs prev
+        , _mcStringFrees    = _mcStringFrees cur    - _mcStringFrees prev
+        , _mcViewportAllocs = _mcViewportAllocs cur - _mcViewportAllocs prev
+        , _mcViewportFrees  = _mcViewportFrees cur  - _mcViewportFrees prev
+        , _mcSpriteCreates  = _mcSpriteCreates cur  - _mcSpriteCreates prev
+        , _mcSpriteDestroys = _mcSpriteDestroys cur - _mcSpriteDestroys prev
+        , _mcSurfaceMaps    = _mcSurfaceMaps cur    - _mcSurfaceMaps prev
+        , _mcSurfaceUnmaps  = _mcSurfaceUnmaps cur  - _mcSurfaceUnmaps prev
+        , _mcDrawCalls      = _mcDrawCalls cur      - _mcDrawCalls prev
+        , _mcAppLaunches    = _mcAppLaunches cur    - _mcAppLaunches prev
+        , _mcAppExits       = _mcAppExits cur       - _mcAppExits prev
+        , _mcWlrBufferCommits = _mcWlrBufferCommits cur - _mcWlrBufferCommits prev
+        }
+  let netTex = _mcTextureAllocs cur - _mcTextureFrees cur
+  let netImg = _mcImageAllocs cur - _mcImageFrees cur
+  let netVp  = _mcViewportAllocs cur - _mcViewportFrees cur
+  let netSprite = _mcSpriteCreates cur - _mcSpriteDestroys cur
+  let netSurf  = _mcSurfaceMaps cur - _mcSurfaceUnmaps cur
+  let netApp   = _mcAppLaunches cur - _mcAppExits cur
+  views <- readTVarIO (gss ^. gssViews)
+  let viewCount = M.size views
+  let ts = show time
+  let line = Prelude.unwords
+        [ "MEMTRACE rss=" ++ show rssMb ++ "MB"
+        , "vsz=" ++ show vszMb ++ "MB"
+        , "static=" ++ show staticMemMb ++ "MB"
+        , "views=" ++ show viewCount
+        , "| d_tex_a=" ++ show (_mcTextureAllocs delta) ++ " d_tex_f=" ++ show (_mcTextureFrees delta)
+        , "d_img_a=" ++ show (_mcImageAllocs delta) ++ " d_img_f=" ++ show (_mcImageFrees delta)
+        , "d_str_a=" ++ show (_mcStringAllocs delta) ++ " d_str_f=" ++ show (_mcStringFrees delta)
+        , "d_vp_a=" ++ show (_mcViewportAllocs delta) ++ " d_vp_f=" ++ show (_mcViewportFrees delta)
+        , "d_spr_c=" ++ show (_mcSpriteCreates delta) ++ " d_spr_d=" ++ show (_mcSpriteDestroys delta)
+        , "d_srf_m=" ++ show (_mcSurfaceMaps delta) ++ " d_srf_u=" ++ show (_mcSurfaceUnmaps delta)
+        , "d_draw=" ++ show (_mcDrawCalls delta)
+        , "d_app_l=" ++ show (_mcAppLaunches delta) ++ " d_app_e=" ++ show (_mcAppExits delta)
+        , "| net_tex=" ++ show netTex ++ " net_img=" ++ show netImg
+        , "net_vp=" ++ show netVp ++ " net_sprite=" ++ show netSprite
+        , "net_surf=" ++ show netSurf ++ " net_app=" ++ show netApp
+        , "d_wlr_buf=" ++ show (_mcWlrBufferCommits delta)
+        ]
+  logStr line
+  hPutStrLn h line
+  hFlush h
+  return ()
+
+forkMemTraceRecursively :: GodotSimulaServer -> IO ()
+forkMemTraceRecursively gss = do
+  maybeLogDir <- lookupEnv "SIMULA_LOG_DIR"
+  let logDir = fromMaybe "." maybeLogDir
+  createDirectoryIfMissing True logDir
+  let memTracePath = logDir ++ "/memtrace.log"
+  h <- openFile memTracePath AppendMode
+  hSetBuffering h NoBuffering
+  _ <- forkIO $ do
+    threadDelay 5000000
+    memTraceLoop h gss emptyMemCounters
+  return ()
+  where
+    memTraceLoop :: Handle -> GodotSimulaServer -> MemCounters -> IO ()
+    memTraceLoop h gss prevCounters = do
+      curCounters <- readTVarIO (gss ^. gssMemCounters)
+      logMemSnapshot h gss prevCounters curCounters
+      delayVar <- registerDelay 5000000
+      atomically $ do
+        ready <- readTVar delayVar
+        check ready
+      memTraceLoop h gss curCounters
 
 forkUpdateHUDRecursively :: GodotSimulaServer -> IO ()
 forkUpdateHUDRecursively gss = do
