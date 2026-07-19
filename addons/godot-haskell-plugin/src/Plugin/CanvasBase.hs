@@ -100,6 +100,7 @@ _draw :: CanvasBase -> [GodotVariant] -> IO ()
 _draw cb _ = do
   gsvs <- readTVarIO (cb ^. cbGSVS)
   gss <- readTVarIO (gsvs ^. gsvsServer)
+  incMemCounter gss mcDrawCalls
   simulaView <- readTVarIO (gsvs ^. gsvsView)
 
   -- Draw surfaces from CanvasSurface
@@ -126,7 +127,6 @@ _draw cb _ = do
 
     drawCanvasSurface :: CanvasBase -> GodotSimulaViewSprite -> IO ()
     drawCanvasSurface cb gsvs = do
-      gss <- readTVarIO (gsvs ^. gsvsServer)
       cs <- readTVarIO (gsvs ^. gsvsCanvasSurface)
       viewportSurface <- readTVarIO (cs ^. csViewport)
       viewportSurfaceTexture <- G.get_texture viewportSurface

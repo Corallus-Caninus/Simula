@@ -84,8 +84,8 @@ instance NativeScript GodotSimulaViewSprite where
                       <*> atomically (newTVar False)
                       <*> atomically (newTVar (error "Failed to initialize GodotSimulaViewSprite."))
                       <*> atomically (newTVar False)
-                      <*> atomically (newTVar [])
-                      <*> atomically (newTVar False)
+                       <*> atomically (newTVar [])
+                       <*> atomically (newTVar False)
   -- classExtends = "RigidBody"
   classMethods =
     [ func NoRPC "_input_event" (catchGodot inputEvent)
@@ -525,6 +525,7 @@ _handle_map :: GodotSimulaViewSprite -> [GodotVariant] -> IO ()
 _handle_map gsvs _ = do
   logPutStrLn $ "_handle_map"
   gss <- readTVarIO (gsvs ^. gsvsServer)
+  incMemCounter gss mcSurfaceMaps
   simulaView <- readTVarIO (gsvs ^. gsvsView)
   let eitherSurface = (simulaView ^. svWlrEitherSurface)
   case eitherSurface of
@@ -657,6 +658,8 @@ _handle_destroy gsvs [gsvsGV] = do
   simulaView <- readTVarIO (gsvs ^. gsvsView)
   let eitherSurface = (simulaView ^. svWlrEitherSurface)
   gss <- readTVarIO (gsvs ^. gsvsServer)
+  incMemCounter gss mcSpriteDestroys
+  incMemCounter gss mcViewportFrees
   maybeActiveCursorGSVS <- readTVarIO (gss ^. gssActiveCursorGSVS)
   case maybeActiveCursorGSVS of
     Just activeCursorGSVS -> case (gsvs == activeCursorGSVS) of
@@ -990,6 +993,7 @@ handle_unmap_base :: GodotSimulaViewSprite -> [GodotVariant] -> IO ()
 handle_unmap_base self [wlrXWaylandSurfaceVariant] = do
   logPutStrLn "handle_unmap_base start"
   gss <- readTVarIO (self ^. gsvsServer)
+  incMemCounter gss mcSurfaceUnmaps
   simulaView <- atomically $ readTVar (self ^. gsvsView)
   freeChildrenMap <- readTVarIO (gss ^. gssFreeChildren)
   wlrXWaylandSurface <- (fromGodotVariant wlrXWaylandSurfaceVariant :: IO GodotWlrXWaylandSurface) >>= validateSurfaceE
@@ -1136,9 +1140,9 @@ handle_wlr_subsurface_destroy gsvs args@[wlrSubsurfaceVariant] = do
 
 handle_wlr_surface_commit :: GodotSimulaViewSprite -> [GodotVariant] -> IO ()
 handle_wlr_surface_commit gsvs args@[wlrSurfaceVariant] = do
-  return ()
+  gss <- readTVarIO (gsvs ^. gsvsServer)
+  incMemCounter gss mcWlrBufferCommits
 
 handle_wlr_surface_destroy :: GodotSimulaViewSprite -> [GodotVariant] -> IO ()
 handle_wlr_surface_destroy gsvs args@[wlrSurfaceVariant] = do
   atomically $ writeTVar (gsvs ^. gsvsIsDamaged) True
-  return ()

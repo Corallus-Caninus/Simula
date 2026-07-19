@@ -853,6 +853,7 @@ ready gss _ = do
   addChild canvasLayer rtLabelW
   addChild canvasLayer rtLabel
   forkUpdateHUDRecursively gss
+  forkMemTraceRecursively gss
 
   return ()
 
@@ -1196,6 +1197,8 @@ initGodotSimulaServer obj = do
 
       gssKeyboardModifiersActive' <- newTVarIO (Nothing) :: IO (TVar (Maybe Modifiers))
 
+      gssMemCounters' <- newTVarIO emptyMemCounters :: IO (TVar MemCounters)
+
       let gss = GodotSimulaServer {
         _gssObj                   = obj                       :: GodotObject
       , _gssWaylandDisplay        = gssWaylandDisplay'        :: TVar GodotWaylandDisplay
@@ -1245,6 +1248,7 @@ initGodotSimulaServer obj = do
       , _gssDampSensitivity       = gssDampSensitivity'       :: TVar DampSensitivity
       , _gssKeyboardModifiersActive = gssKeyboardModifiersActive' :: TVar (Maybe Modifiers)
       , _gssShuttingDown            = gssShuttingDown'            :: TVar Bool
+      , _gssMemCounters             = gssMemCounters'             :: TVar MemCounters
       }
   return gss
   where getStartingAppsStr :: Maybe String -> String
@@ -1287,6 +1291,7 @@ _on_WlrXdgShell_new_surface_body gss wlrXdgSurfaceVariant = do
                G.set_tiled wlrXdgToplevel True
                simulaView <- newSimulaViewXdg gss wlrXdgSurface
                gsvs <- newGodotSimulaViewSprite gss simulaView
+               incMemCounter gss mcSpriteCreates
 
                connectGodotSignal gsvs "map" gss "handle_map_surface" []
                connectGodotSignal wlrXdgSurface "destroy" gsvs "_handle_destroy" []
@@ -1341,6 +1346,7 @@ _on_WlrXWayland_new_surface_body gss wlrXWaylandSurfaceVariant = do
   G.reference wlrXWaylandSurface
   simulaView <- newSimulaViewXWayland gss wlrXWaylandSurface
   gsvs <- newGodotSimulaViewSprite gss simulaView
+  incMemCounter gss mcSpriteCreates
 
   connectGodotSignal gsvs "map" gss "handle_map_surface" []
   connectGodotSignal wlrXWaylandSurface "map_free_child" gsvs "handle_map_free_child" []

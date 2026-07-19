@@ -92,6 +92,8 @@ _process self args = do
 _draw :: CanvasSurface -> [GodotVariant] -> IO ()
 _draw cs _ = do
   gsvs <- readTVarIO (cs ^. csGSVS)
+  gss <- readTVarIO (gsvs ^. gsvsServer)
+  incMemCounter gss mcDrawCalls
   depthFirstSurfaces <- getDepthFirstSurfaces gsvs
 
   isEntirelyDamaged <- readTVarIO (gsvs ^. gsvsIsDamaged)
