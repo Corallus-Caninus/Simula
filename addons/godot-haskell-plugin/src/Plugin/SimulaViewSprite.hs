@@ -86,6 +86,7 @@ instance NativeScript GodotSimulaViewSprite where
                       <*> atomically (newTVar False)
                        <*> atomically (newTVar [])
                        <*> atomically (newTVar False)
+                       <*> atomically (newTVar Nothing)
   -- classExtends = "RigidBody"
   classMethods =
     [ func NoRPC "_input_event" (catchGodot inputEvent)
@@ -345,6 +346,7 @@ newGodotSimulaViewSprite gss simulaView = do
   atomically $ writeTVar (_gsvsShape             gsvs) godotBoxShape
   atomically $ writeTVar (_gsvsView              gsvs) simulaView
   atomically $ writeTVar (_gsvsCursorCoordinates gsvs) (SurfaceLocalCoordinates (0,0))
+  atomically $ writeTVar (_gsvsSurfaceTexture    gsvs) Nothing
 
   -- Set config settings
   configuration <- readTVarIO (gss ^. gssConfiguration)
@@ -1142,6 +1144,7 @@ handle_wlr_surface_commit :: GodotSimulaViewSprite -> [GodotVariant] -> IO ()
 handle_wlr_surface_commit gsvs args@[wlrSurfaceVariant] = do
   gss <- readTVarIO (gsvs ^. gsvsServer)
   incMemCounter gss mcWlrBufferCommits
+  atomically $ writeTVar (gsvs ^. gsvsSurfaceTexture) Nothing
 
 handle_wlr_surface_destroy :: GodotSimulaViewSprite -> [GodotVariant] -> IO ()
 handle_wlr_surface_destroy gsvs args@[wlrSurfaceVariant] = do

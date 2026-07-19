@@ -1,5 +1,4 @@
 {-# LANGUAGE RankNTypes             #-}
-{-# LANGUAGE BlockArguments         #-}
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -344,11 +343,12 @@ data GodotSimulaViewSprite = GodotSimulaViewSprite
   , _gsvsIsAtTargetDims    :: TVar Bool
   , _gsvsDamagedRegions    :: TVar [GodotRect2]
   , _gsvsIsDamaged         :: TVar Bool
+  , _gsvsSurfaceTexture    :: TVar (Maybe GodotTexture)
   }
 
 instance HasBaseClass GodotSimulaViewSprite where
   type BaseClass GodotSimulaViewSprite = GodotRigidBody
-  super (GodotSimulaViewSprite obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotRigidBody obj
+  super (GodotSimulaViewSprite obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotRigidBody obj
 
 data CanvasBase = CanvasBase {
     _cbObject       :: GodotObject

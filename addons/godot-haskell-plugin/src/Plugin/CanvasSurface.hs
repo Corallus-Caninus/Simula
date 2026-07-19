@@ -139,6 +139,16 @@ _draw cs _ = do
       savePng cs viewportSurfaceTexture wlrSurface
       return ()
 
+    getOrFetchTexture :: GodotSimulaViewSprite -> GodotWlrSurface -> IO GodotTexture
+    getOrFetchTexture gsvs wlrSurface = do
+      maybeCached <- readTVarIO (gsvs ^. gsvsSurfaceTexture)
+      case maybeCached of
+        Just tex -> return tex
+        Nothing -> do
+          tex <- G.get_texture wlrSurface
+          atomically $ writeTVar (gsvs ^. gsvsSurfaceTexture) (Just tex)
+          return tex
+
     drawWlrSurface :: CanvasSurface -> (GodotWlrSurface, Int, Int) -> IO ()
     drawWlrSurface cs (wlrSurface, x, y) = do
       validateSurfaceE wlrSurface
@@ -146,7 +156,7 @@ _draw cs _ = do
       gsvsTransparency <- getTransparency cs
       modulateColor <- (toLowLevel $ (rgb 1.0 1.0 1.0) `withOpacity` gsvsTransparency) :: IO GodotColor
       renderPosition <- toLowLevel (V2 (fromIntegral x) (fromIntegral y))
-      surfaceTexture <- G.get_texture wlrSurface :: IO GodotTexture
+      surfaceTexture <- getOrFetchTexture gsvs wlrSurface
       G.draw_texture cs surfaceTexture renderPosition modulateColor (coerce nullPtr)
       G.send_frame_done wlrSurface
 
@@ -160,7 +170,7 @@ _draw cs _ = do
     drawWlrSurfaceRegions cs regions (wlrSurface, x, y) = do
       gsvs <- readTVarIO (cs ^. csGSVS)
       validateSurfaceE wlrSurface
-      surfaceTexture <- G.get_texture wlrSurface :: IO GodotTexture
+      surfaceTexture <- getOrFetchTexture gsvs wlrSurface
       case (validateObject surfaceTexture) of
         Nothing -> return ()
         Just surfaceTexture -> do
