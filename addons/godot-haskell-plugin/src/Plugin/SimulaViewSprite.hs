@@ -1144,7 +1144,6 @@ handle_wlr_surface_commit :: GodotSimulaViewSprite -> [GodotVariant] -> IO ()
 handle_wlr_surface_commit gsvs args@[wlrSurfaceVariant] = do
   gss <- readTVarIO (gsvs ^. gsvsServer)
   incMemCounter gss mcWlrBufferCommits
-<<<<<<< HEAD
   atomically $ writeTVar (gsvs ^. gsvsSurfaceTexture) Nothing
 
 handle_wlr_surface_destroy :: GodotSimulaViewSprite -> [GodotVariant] -> IO ()
