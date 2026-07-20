@@ -94,6 +94,11 @@ _draw cs _ = do
   gsvs <- readTVarIO (cs ^. csGSVS)
   gss <- readTVarIO (gsvs ^. gsvsServer)
   incMemCounter gss mcDrawCalls
+  -- Free GPU backing RIDs from the previous frame's textures
+  lastTexs <- readTVarIO (gsvs ^. gsvsLastFrameTextures)
+  vs <- readTVarIO (gss ^. gssVisualServer)
+  mapM_ (\t -> do rid <- G.get_rid t; G.free_rid vs rid; incMemCounter gss mcTextureFrees) lastTexs
+  atomically $ writeTVar (gsvs ^. gsvsLastFrameTextures) []
   depthFirstSurfaces <- getDepthFirstSurfaces gsvs
 
   isEntirelyDamaged <- readTVarIO (gsvs ^. gsvsIsDamaged)
@@ -143,10 +148,13 @@ _draw cs _ = do
     drawWlrSurface cs (wlrSurface, x, y) = do
       validateSurfaceE wlrSurface
       gsvs <- readTVarIO (cs ^. csGSVS)
+      gss <- readTVarIO (gsvs ^. gsvsServer)
       gsvsTransparency <- getTransparency cs
       modulateColor <- (toLowLevel $ (rgb 1.0 1.0 1.0) `withOpacity` gsvsTransparency) :: IO GodotColor
       renderPosition <- toLowLevel (V2 (fromIntegral x) (fromIntegral y))
       surfaceTexture <- G.get_texture wlrSurface :: IO GodotTexture
+      incMemCounter gss mcTextureAllocs
+      atomically $ modifyTVar' (gsvs ^. gsvsLastFrameTextures) (surfaceTexture :)
       G.draw_texture cs surfaceTexture renderPosition modulateColor (coerce nullPtr)
       G.send_frame_done wlrSurface
 
@@ -159,8 +167,11 @@ _draw cs _ = do
     drawWlrSurfaceRegions :: CanvasSurface -> [GodotRect2] -> (GodotWlrSurface, Int, Int) -> IO ()
     drawWlrSurfaceRegions cs regions (wlrSurface, x, y) = do
       gsvs <- readTVarIO (cs ^. csGSVS)
+      gss <- readTVarIO (gsvs ^. gsvsServer)
       validateSurfaceE wlrSurface
       surfaceTexture <- G.get_texture wlrSurface :: IO GodotTexture
+      incMemCounter gss mcTextureAllocs
+      atomically $ modifyTVar' (gsvs ^. gsvsLastFrameTextures) (surfaceTexture :)
       case (validateObject surfaceTexture) of
         Nothing -> return ()
         Just surfaceTexture -> do
