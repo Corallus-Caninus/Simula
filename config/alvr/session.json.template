@@ -5,10 +5,10 @@
     "other_paths": []
   },
   "openvr_config": {
-    "eye_resolution_width": 3008,
-    "eye_resolution_height": 3168,
-    "target_eye_resolution_width": 3360,
-    "target_eye_resolution_height": 3520,
+    "eye_resolution_width": 2496,
+    "eye_resolution_height": 2624,
+    "target_eye_resolution_width": 2496,
+    "target_eye_resolution_height": 2624,
     "tracking_ref_only": false,
     "enable_vive_tracker_proxy": false,
     "aggressive_keyframe_resend": false,
@@ -24,7 +24,7 @@
     "amd_encoder_quality_preset": 0,
     "rate_control_mode": 0,
     "filler_data": false,
-    "entropy_coding": 0,
+    "entropy_coding": 1,
     "force_sw_encoding": false,
     "sw_thread_count": 0,
     "controller_is_tracker": false,
@@ -50,7 +50,7 @@
     "nvenc_adaptive_quantization_mode": 2,
     "nvenc_low_delay_key_frame_scale": -1,
     "nvenc_refresh_rate": -1,
-    "enable_intra_refresh": false,
+    "enable_intra_refresh": true,
     "intra_refresh_period": -1,
     "intra_refresh_count": -1,
     "max_num_ref_frames": -1,
@@ -61,27 +61,18 @@
     "rc_initial_delay": -1,
     "rc_max_bitrate": -1,
     "rc_average_bitrate": -1,
-    "nvenc_enable_weighted_prediction": false,
+    "nvenc_enable_weighted_prediction": true,
     "capture_frame_dir": "",
     "amd_bitrate_corruption_fix": false,
     "_controller_profile": 0
   },
-  "client_connections": {
-    "6905.client": {
-      "display_name": "Quest 3",
-      "current_ip": "192.168.6.129",
-      "manual_ips": [],
-      "trusted": true,
-      "connection_state": "Streaming",
-      "cabled": false
-    }
-  },
+  "client_connections": {},
   "session_settings": {
     "video": {
       "gui_collapsed": false,
       "adapter_index": 0,
       "transcoding_view_resolution": {
-        "Scale": 1.3,
+        "Scale": 1.5,
         "Absolute": {
           "width": 2064,
           "height": {
@@ -92,7 +83,7 @@
         "variant": "Scale"
       },
       "emulated_headset_view_resolution": {
-        "Scale": 1.3,
+        "Scale": 1.5,
         "Absolute": {
           "width": 3096,
           "height": {
@@ -103,13 +94,13 @@
         "variant": "Scale"
       },
       "preferred_fps": 72.0,
-      "max_buffering_frames": 3.0,
+      "max_buffering_frames": 2.0,
       "buffering_history_weight": 0.9,
       "optimize_game_render_latency": false,
       "bitrate": {
         "gui_collapsed": false,
         "mode": {
-          "ConstantMbps": 1000,
+          "ConstantMbps": 450,
           "Adaptive": {
             "gui_collapsed": false,
             "saturation_multiplier": 0.95,
@@ -118,30 +109,30 @@
               "content": 100
             },
             "min_bitrate_mbps": {
-              "enabled": false,
-              "content": 5
+              "enabled": true,
+              "content": 100
             },
             "max_network_latency_ms": {
               "enabled": false,
               "content": 8
             },
             "encoder_latency_limiter": {
-              "enabled": true,
+              "enabled": false,
               "content": {
                 "max_saturation_multiplier": 0.9
               }
             },
             "decoder_latency_limiter": {
-              "enabled": true,
+              "enabled": false,
               "content": {
-                "gui_collapsed": true,
-                "max_decoder_latency_ms": 30,
-                "latency_overstep_frames": 90,
+                "gui_collapsed": false,
+                "max_decoder_latency_ms": 20,
+                "latency_overstep_frames": 30,
                 "latency_overstep_multiplier": 0.99
               }
             }
           },
-          "variant": "Adaptive"
+          "variant": "ConstantMbps"
         },
         "adapt_to_framerate": {
           "enabled": true,
@@ -165,7 +156,7 @@
           "variant": "High"
         },
         "entropy_coding": {
-          "variant": "Cabac"
+          "variant": "Cavlc"
         },
         "use_10bit": false,
         "nvenc": {
@@ -184,7 +175,7 @@
           },
           "low_delay_key_frame_scale": -1,
           "refresh_rate": -1,
-          "enable_intra_refresh": false,
+          "enable_intra_refresh": true,
           "intra_refresh_period": -1,
           "intra_refresh_count": -1,
           "max_num_ref_frames": -1,
@@ -195,10 +186,10 @@
           "rc_initial_delay": -1,
           "rc_max_bitrate": -1,
           "rc_average_bitrate": -1,
-          "enable_weighted_prediction": false
+          "enable_weighted_prediction": true
         },
         "amf": {
-          "gui_collapsed": false,
+          "gui_collapsed": true,
           "quality_preset": {
             "variant": "Quality"
           },
@@ -293,10 +284,10 @@
         "content": {
           "gui_collapsed": false,
           "brightness": 0.0,
-          "contrast": 0.0,
+          "contrast": 0.49999997,
           "saturation": 0.5,
-          "gamma": 1.0,
-          "sharpening": 0.5
+          "gamma": 1.1999999,
+          "sharpening": -2.2351742e-08
         }
       }
     },
@@ -1031,8 +1022,8 @@
       "max_queued_server_video_frames": 1024,
       "avoid_video_glitching": false,
       "aggressive_keyframe_resend": false,
-      "on_connect_script": "/home/jward/.config/alvr/audio-setup.sh",
-      "on_disconnect_script": "/home/jward/.config/alvr/audio-setup.sh",
+      "on_connect_script": "USER_REPLACE_ME",
+      "on_disconnect_script": "USER_REPLACE_ME",
       "packet_size": 1400,
       "statistics_history_size": 256
     },
@@ -1065,8 +1056,7 @@
       "driver_launch_action": {
         "variant": "UnregisterOtherDriversAtStartup"
       },
-      "open_close_steamvr_with_dashboard": false,
-      "direct_launch": false
+      "open_close_steamvr_with_dashboard": false
     },
     "capture": {
       "gui_collapsed": false,
