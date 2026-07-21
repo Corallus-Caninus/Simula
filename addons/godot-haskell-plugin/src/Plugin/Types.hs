@@ -351,14 +351,15 @@ instance HasBaseClass GodotSimulaViewSprite where
   super (GodotSimulaViewSprite obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotRigidBody obj
 
 data CanvasBase = CanvasBase {
-    _cbObject       :: GodotObject
-  , _cbGSVS         :: TVar GodotSimulaViewSprite
-  , _cbViewport     :: TVar GodotViewport
+    _cbObject                  :: GodotObject
+  , _cbGSVS                    :: TVar GodotSimulaViewSprite
+  , _cbViewport                :: TVar GodotViewport
+  , _cbLastFrameTextureCounts  :: TVar (M.Map GodotTexture Int)
 }
 
 instance HasBaseClass CanvasBase where
   type BaseClass CanvasBase = GodotNode2D
-  super (CanvasBase obj _ _ ) = GodotNode2D obj
+  super (CanvasBase obj _ _ _ ) = GodotNode2D obj
 
 data CanvasSurface = CanvasSurface {
     _csObject       :: GodotObject
