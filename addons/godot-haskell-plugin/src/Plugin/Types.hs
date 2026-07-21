@@ -343,23 +343,21 @@ data GodotSimulaViewSprite = GodotSimulaViewSprite
   , _gsvsIsAtTargetDims    :: TVar Bool
   , _gsvsDamagedRegions    :: TVar [GodotRect2]
   , _gsvsIsDamaged         :: TVar Bool
-  , _gsvsLastFrameTextureCounts :: TVar (M.Map GodotTexture Int)
   }
 
 instance HasBaseClass GodotSimulaViewSprite where
   type BaseClass GodotSimulaViewSprite = GodotRigidBody
-  super (GodotSimulaViewSprite obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotRigidBody obj
+  super (GodotSimulaViewSprite obj _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _)  = GodotRigidBody obj
 
 data CanvasBase = CanvasBase {
-    _cbObject                  :: GodotObject
-  , _cbGSVS                    :: TVar GodotSimulaViewSprite
-  , _cbViewport                :: TVar GodotViewport
-  , _cbLastFrameTextureCounts  :: TVar (M.Map GodotTexture Int)
+    _cbObject       :: GodotObject
+  , _cbGSVS         :: TVar GodotSimulaViewSprite
+  , _cbViewport     :: TVar GodotViewport
 }
 
 instance HasBaseClass CanvasBase where
   type BaseClass CanvasBase = GodotNode2D
-  super (CanvasBase obj _ _ _ ) = GodotNode2D obj
+  super (CanvasBase obj _ _ ) = GodotNode2D obj
 
 data CanvasSurface = CanvasSurface {
     _csObject       :: GodotObject
@@ -1188,9 +1186,6 @@ getEnvironmentTexture worldEnvironment filePath = do
 instance Eq GodotTexture where
   texture1 == texture2 = ((coerce texture1) :: Ptr ()) == ((coerce texture2) :: Ptr ())
 
-instance Ord GodotTexture where
-  compare t1 t2 = compare ((coerce t1) :: Ptr ()) ((coerce t2) :: Ptr ())
-
 next :: Eq a => Maybe a -> [a] -> Maybe a
 next _ []             = Nothing
 next Nothing    (x:_) = Just x
@@ -1955,6 +1950,11 @@ logMemSnapshot h gss prev cur = do
   case staticMem of
     Left e -> logStr $ "MEMTRACE get_static_memory_usage failed: " ++ show e
     Right _ -> return ()
+  vs <- readTVarIO (gss ^. gssVisualServer)
+  texMemMb <- try (G.get_render_info vs G.INFO_TEXTURE_MEM_USED) :: IO (Either SomeException Int)
+  vertMemMb <- try (G.get_render_info vs G.INFO_VERTEX_MEM_USED) :: IO (Either SomeException Int)
+  let texMem = case texMemMb of Right bytes -> fromIntegral bytes / (1024 * 1024); Left _ -> 0.0
+  let vertMem = case vertMemMb of Right bytes -> fromIntegral bytes / (1024 * 1024); Left _ -> 0.0
   let delta = MemCounters
         { _mcTextureAllocs  = _mcTextureAllocs cur  - _mcTextureAllocs prev
         , _mcTextureFrees   = _mcTextureFrees cur   - _mcTextureFrees prev
@@ -1999,6 +1999,8 @@ logMemSnapshot h gss prev cur = do
         , "net_vp=" ++ show netVp ++ " net_sprite=" ++ show netSprite
         , "net_surf=" ++ show netSurf ++ " net_app=" ++ show netApp
         , "d_wlr_buf=" ++ show (_mcWlrBufferCommits delta)
+        , "| tex_mem=" ++ show texMem ++ "MB"
+        , "vert_mem=" ++ show vertMem ++ "MB"
         ]
   logStr line
   hPutStrLn h line

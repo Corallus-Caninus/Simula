@@ -66,7 +66,6 @@ instance NativeScript CanvasBase where
     CanvasBase (safeCast obj)
                   <$> atomically (newTVar (error "Failed to initialize CanvasBase."))
                   <*> atomically (newTVar (error "Failed to initialize CanvasBase."))
-                  <*> atomically (newTVar mempty)
   classMethods =
     [
       func NoRPC "_process" (catchGodot Plugin.CanvasBase._process)
@@ -85,7 +84,6 @@ newCanvasBase gsvs = do
 
   atomically $ writeTVar (_cbGSVS cb) gsvs
   atomically $ writeTVar (_cbViewport cb) viewport
-  atomically $ writeTVar (_cbLastFrameTextureCounts cb) mempty
 
   return cb
 
@@ -103,12 +101,6 @@ _draw cb _ = do
   gsvs <- readTVarIO (cb ^. cbGSVS)
   gss <- readTVarIO (gsvs ^. gsvsServer)
   incMemCounter gss mcDrawCalls
-  texCounts <- readTVarIO (cb ^. cbLastFrameTextureCounts)
-  mapM_ (\(tex, count) -> replicateM_ count $ do
-    _ <- G.unreference (safeCast tex :: GodotReference)
-    incMemCounter gss mcTextureFrees
-    ) (M.toList texCounts)
-  atomically $ writeTVar (cb ^. cbLastFrameTextureCounts) M.empty
   simulaView <- readTVarIO (gsvs ^. gsvsView)
 
   -- Draw surfaces from CanvasSurface
@@ -140,7 +132,6 @@ _draw cb _ = do
       viewportSurface <- readTVarIO (cs ^. csViewport)
       viewportSurfaceTexture <- G.get_texture viewportSurface
       incMemCounter gss mcTextureAllocs
-      atomically $ modifyTVar' (cb ^. cbLastFrameTextureCounts) (M.insertWith (+) (safeCast viewportSurfaceTexture :: GodotTexture) 1)
       renderPosition <- toLowLevel (V2 0 0) :: IO GodotVector2
       gsvsTransparency <- getTransparency cb
       modulateColor <- (toLowLevel $ (rgb 1.0 1.0 (1.0 :: Double)) `withOpacity` gsvsTransparency) :: IO GodotColor
@@ -161,7 +152,6 @@ _draw cb _ = do
            validateSurfaceE wlrSurfaceCursor
            cursorTexture <- G.get_texture wlrSurfaceCursor
            incMemCounter gss mcTextureAllocs
-           atomically $ modifyTVar' (cb ^. cbLastFrameTextureCounts) (M.insertWith (+) cursorTexture 1)
            cursorRenderPosition <- toLowLevel (V2 sx sy) :: IO GodotVector2
            godotColor <- (toLowLevel $ (rgb 1.0 1.0 1.0) `withOpacity` 1.0) :: IO GodotColor
            G.draw_texture cb cursorTexture cursorRenderPosition godotColor (coerce nullPtr)
