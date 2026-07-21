@@ -94,10 +94,12 @@ _draw cs _ = do
   gsvs <- readTVarIO (cs ^. csGSVS)
   gss <- readTVarIO (gsvs ^. gsvsServer)
   incMemCounter gss mcDrawCalls
-  lastTexs <- readTVarIO (gsvs ^. gsvsLastFrameTextures)
-  let uniqueTexs = Data.List.nub lastTexs
-  mapM_ (\t -> do _ <- G.unreference (safeCast t :: GodotReference); incMemCounter gss mcTextureFrees) uniqueTexs
-  atomically $ writeTVar (gsvs ^. gsvsLastFrameTextures) []
+  texCounts <- readTVarIO (gsvs ^. gsvsLastFrameTextureCounts)
+  mapM_ (\(tex, count) -> replicateM_ count $ do
+    _ <- G.unreference (safeCast tex :: GodotReference)
+    incMemCounter gss mcTextureFrees
+    ) (M.toList texCounts)
+  atomically $ writeTVar (gsvs ^. gsvsLastFrameTextureCounts) M.empty
   depthFirstSurfaces <- getDepthFirstSurfaces gsvs
 
   isEntirelyDamaged <- readTVarIO (gsvs ^. gsvsIsDamaged)
@@ -153,7 +155,7 @@ _draw cs _ = do
       renderPosition <- toLowLevel (V2 (fromIntegral x) (fromIntegral y))
       surfaceTexture <- G.get_texture wlrSurface :: IO GodotTexture
       incMemCounter gss mcTextureAllocs
-      atomically $ modifyTVar' (gsvs ^. gsvsLastFrameTextures) (surfaceTexture :)
+      atomically $ modifyTVar' (gsvs ^. gsvsLastFrameTextureCounts) (M.insertWith (+) surfaceTexture 1)
       G.draw_texture cs surfaceTexture renderPosition modulateColor (coerce nullPtr)
       G.send_frame_done wlrSurface
 
@@ -170,7 +172,7 @@ _draw cs _ = do
       validateSurfaceE wlrSurface
       surfaceTexture <- G.get_texture wlrSurface :: IO GodotTexture
       incMemCounter gss mcTextureAllocs
-      atomically $ modifyTVar' (gsvs ^. gsvsLastFrameTextures) (surfaceTexture :)
+      atomically $ modifyTVar' (gsvs ^. gsvsLastFrameTextureCounts) (M.insertWith (+) surfaceTexture 1)
       case (validateObject surfaceTexture) of
         Nothing -> return ()
         Just surfaceTexture -> do

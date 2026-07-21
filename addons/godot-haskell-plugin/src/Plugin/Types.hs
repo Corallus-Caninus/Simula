@@ -343,7 +343,7 @@ data GodotSimulaViewSprite = GodotSimulaViewSprite
   , _gsvsIsAtTargetDims    :: TVar Bool
   , _gsvsDamagedRegions    :: TVar [GodotRect2]
   , _gsvsIsDamaged         :: TVar Bool
-  , _gsvsLastFrameTextures :: TVar [GodotTexture]
+  , _gsvsLastFrameTextureCounts :: TVar (M.Map GodotTexture Int)
   }
 
 instance HasBaseClass GodotSimulaViewSprite where
@@ -1186,6 +1186,9 @@ getEnvironmentTexture worldEnvironment filePath = do
 
 instance Eq GodotTexture where
   texture1 == texture2 = ((coerce texture1) :: Ptr ()) == ((coerce texture2) :: Ptr ())
+
+instance Ord GodotTexture where
+  compare t1 t2 = compare ((coerce t1) :: Ptr ()) ((coerce t2) :: Ptr ())
 
 next :: Eq a => Maybe a -> [a] -> Maybe a
 next _ []             = Nothing

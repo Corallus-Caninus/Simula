@@ -86,7 +86,7 @@ instance NativeScript GodotSimulaViewSprite where
                       <*> atomically (newTVar False)
                        <*> atomically (newTVar [])
                        <*> atomically (newTVar False)
-                       <*> atomically (newTVar [])
+                       <*> atomically (newTVar mempty)
   -- classExtends = "RigidBody"
   classMethods =
     [ func NoRPC "_input_event" (catchGodot inputEvent)
@@ -346,7 +346,7 @@ newGodotSimulaViewSprite gss simulaView = do
   atomically $ writeTVar (_gsvsShape             gsvs) godotBoxShape
   atomically $ writeTVar (_gsvsView              gsvs) simulaView
   atomically $ writeTVar (_gsvsCursorCoordinates gsvs) (SurfaceLocalCoordinates (0,0))
-  atomically $ writeTVar (_gsvsLastFrameTextures  gsvs) []
+  atomically $ writeTVar (_gsvsLastFrameTextureCounts gsvs) mempty
 
   -- Set config settings
   configuration <- readTVarIO (gss ^. gssConfiguration)
