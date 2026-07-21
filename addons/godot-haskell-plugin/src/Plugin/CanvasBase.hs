@@ -127,9 +127,11 @@ _draw cb _ = do
 
     drawCanvasSurface :: CanvasBase -> GodotSimulaViewSprite -> IO ()
     drawCanvasSurface cb gsvs = do
+      gss <- readTVarIO (gsvs ^. gsvsServer)
       cs <- readTVarIO (gsvs ^. gsvsCanvasSurface)
       viewportSurface <- readTVarIO (cs ^. csViewport)
       viewportSurfaceTexture <- G.get_texture viewportSurface
+      incMemCounter gss mcTextureAllocs
       renderPosition <- toLowLevel (V2 0 0) :: IO GodotVector2
       gsvsTransparency <- getTransparency cb
       modulateColor <- (toLowLevel $ (rgb 1.0 1.0 (1.0 :: Double)) `withOpacity` gsvsTransparency) :: IO GodotColor
@@ -149,6 +151,7 @@ _draw cb _ = do
            -- Draw client provided cursor
            validateSurfaceE wlrSurfaceCursor
            cursorTexture <- G.get_texture wlrSurfaceCursor
+           incMemCounter gss mcTextureAllocs
            cursorRenderPosition <- toLowLevel (V2 sx sy) :: IO GodotVector2
            godotColor <- (toLowLevel $ (rgb 1.0 1.0 1.0) `withOpacity` 1.0) :: IO GodotColor
            G.draw_texture cb cursorTexture cursorRenderPosition godotColor (coerce nullPtr)
