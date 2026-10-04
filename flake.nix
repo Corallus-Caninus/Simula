@@ -290,22 +290,49 @@
                   # Detect active X11 display
                   export DISPLAY="''${DISPLAY:-:0}"
 
-                  # --- WiVRn: start the server if it is not already running. ---
+                  # --- WiVRn: ensure exactly one server is running. ---
                   # LD_LIBRARY_PATH exposes /run/opengl-driver/lib so
                   # libavcodec can load libnvidia-encode.so.1 (NVENC).
                   # WIVRN_NO_CONTROLLERS=1 stops WiVRn exposing controllers/
                   # hand trackers, so Simula spawns no pointer rays.
-                  if ! pgrep -f "$WIVRN/bin/wivrn-server" >/dev/null 2>&1; then
+                  #
+                  # WiVRn forks a child per connection and truncates the
+                  # process name, and "pgrep -f wivrn-server" matches the
+                  # the caller own shell, so detect a running server by its
+                  # executable path (and by the listening port). If one is up
+                  # (systemd unit, dashboard, previous run) reuse it rather
+                  # than starting a second one ("Address already in use").
+                  wivrn_running() {
+                      for _p in /proc/[0-9]*; do
+                          _e=$(readlink "$_p/exe" 2>/dev/null) || continue
+                          case "$_e" in *wivrn-server*) return 0;; esac
+                      done
+                      return 1
+                  }
+                  if wivrn_running; then
+                      echo "WiVRn server already running; reusing it."
+                  elif ss -ltn 2>/dev/null | grep -q :9757; then
+                      echo "Port 9757 busy but no wivrn-server; clearing stale listeners."
+                      for _pid in $(ss -ltnp 2>/dev/null | grep :9757 | grep -oE pid=[0-9]+ | cut -d= -f2 | sort -u); do
+                          kill "$_pid" 2>/dev/null || true
+                      done
+                      sleep 1
+                  fi
+                  if ! wivrn_running && ! ss -ltn 2>/dev/null | grep -q :9757; then
                       echo "Starting WiVRn server..."
+                      rm -f "/run/user/$(id -u)/wivrn/comp_ipc"
                       nohup env -u LD_LIBRARY_PATH \
                           LD_LIBRARY_PATH=/run/opengl-driver/lib \
                           XDG_RUNTIME_DIR="/run/user/$(id -u)" \
                           WIVRN_NO_CONTROLLERS=1 \
                           "$WIVRN/bin/wivrn-server" >/tmp/wivrn-server.log 2>&1 </dev/null &
-                      for _ in $(seq 1 20); do
+                      for _ in $(seq 1 40); do
                           ss -ltn 2>/dev/null | grep -q :9757 && break
                           sleep 0.5
                       done
+                      if ! ss -ltn 2>/dev/null | grep -q :9757; then
+                          echo "Warning: WiVRn server did not start; see /tmp/wivrn-server.log" >&2
+                      fi
                   fi
 
                   # --- OpenXR runtime ---
