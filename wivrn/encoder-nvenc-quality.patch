@@ -1,15 +1,13 @@
 diff -ruN wvo/server/encoder/encoder_settings.cpp wvp/server/encoder/encoder_settings.cpp
---- a/server/encoder/encoder_settings.cpp	2026-10-04 16:51:16.916251326 +0000
-+++ b/server/encoder/encoder_settings.cpp	2026-10-04 16:50:28.597090193 +0000
-@@ -51,8 +51,13 @@
+--- a/server/encoder/encoder_settings.cpp	2026-10-04 20:54:08.603631334 +0000
++++ b/server/encoder/encoder_settings.cpp	2026-10-04 20:54:08.999615888 +0000
+@@ -51,8 +51,11 @@
  	for (auto [i, encoder]: std::ranges::enumerate_view(encoders))
  	{
  		double w = encoder.width * encoder.height;
-+		// SIMULA PATCH: encoder index 2 is the passthrough/alpha stream. We
-+		// do not use passthrough, but its weight stole ~5% of the client
-+		// bitrate, and the remaining ~95% was then split between the two
-+		// eyes (so a 200 Mbps client setting produced ~98 Mbps per eye).
-+		// Give it zero weight so the full bitrate goes to the eyes.
++		// SIMULA PATCH: encoder 2 is the passthrough/alpha stream. We do not
++		// use passthrough; give it zero weight so the whole client bitrate
++		// goes to the two eyes (a 200 Mbps setting => 200 Mbps per eye).
  		if (i == 2)
 -			w *= passthrough_bitrate_factor;
 +			w = 0;
@@ -17,39 +15,25 @@ diff -ruN wvo/server/encoder/encoder_settings.cpp wvp/server/encoder/encoder_set
  		{
  			case wivrn::h264:
 diff -ruN wvo/server/encoder/video_encoder_nvenc.cpp wvp/server/encoder/video_encoder_nvenc.cpp
---- a/server/encoder/video_encoder_nvenc.cpp	2026-10-04 16:51:17.169252192 +0000
-+++ b/server/encoder/video_encoder_nvenc.cpp	2026-10-04 16:51:09.594226376 +0000
-@@ -134,14 +134,19 @@
- 
- NV_ENC_RC_PARAMS video_encoder_nvenc::get_rc_params(uint64_t bitrate, float framerate)
- {
-+	// SIMULA PATCH: favour compression quality over the most aggressive
-+	// low-latency mode (which produced visible artifacts at streaming
-+	// bitrates). CBR + a 2-frame VBV is still low latency, but we enable
-+	// lookahead and full-resolution multi-pass so NVENC spends the bits
-+	// better. (Client maxes the bitrate; the two eyes now get all of it.)
- 	return {
- 	        .rateControlMode = NV_ENC_PARAMS_RC_CBR,
- 	        .averageBitRate = static_cast<uint32_t>(bitrate),
- 	        .vbvBufferSize = static_cast<uint32_t>(bitrate / framerate * 2.0f),
+--- a/server/encoder/video_encoder_nvenc.cpp	2026-10-04 20:54:08.978616707 +0000
++++ b/server/encoder/video_encoder_nvenc.cpp	2026-10-04 20:54:09.005615655 +0000
+@@ -141,7 +141,7 @@
  	        .vbvInitialDelay = static_cast<uint32_t>(bitrate / framerate),
--	        .enableLookahead = 0,
-+	        .enableLookahead = 1,
+ 	        .enableLookahead = 0,
  	        .lowDelayKeyFrameScale = 1,
 -	        .multiPass = NV_ENC_TWO_PASS_QUARTER_RESOLUTION};
 +	        .multiPass = NV_ENC_TWO_PASS_FULL_RESOLUTION};
  }
  
  void video_encoder_nvenc::set_init_params_fps(float framerate)
-@@ -201,10 +206,35 @@
+@@ -201,10 +201,34 @@
  
  #pragma GCC diagnostic push
  #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 -	GUID presetGUID = NV_ENC_PRESET_P4_GUID;
 -	check_preset_guid_supported(shared_state, session_handle, encodeGUID, presetGUID);
-+	// SIMULA PATCH: prefer the higher-quality preset/tuning. Fall back to
-+	// the original P4 / ULTRA_LOW_LATENCY if this GPU/driver rejects them
-+	// (old Pascal drivers may not support HIGH_QUALITY tuning).
++	// SIMULA PATCH: prefer higher compression quality. Fall back to the
++	// original P4 / ULTRA_LOW_LATENCY if the GPU/driver rejects them.
 +	GUID presetGUID = NV_ENC_PRESET_P6_GUID;
 +	try
 +	{
