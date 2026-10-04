@@ -55,7 +55,12 @@
             wivrn = unstable.wivrn.override { ffmpeg = unstable.ffmpeg_7; };
           in wivrn.overrideAttrs (old: {
             cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DWIVRN_USE_NVENC:BOOL=TRUE" ];
-            patches = (old.patches or [ ]) ++ [ ./wivrn/disable-controllers.patch ];
+            patches = (old.patches or [ ]) ++ [
+              ./wivrn/disable-controllers.patch
+              # Full per-eye bitrate (drop the alpha-stream weight) + NVENC
+              # HIGH_QUALITY tuning/preset (P6, lookahead, full-res multi-pass).
+              ./wivrn/encoder-nvenc-quality.patch
+            ];
           });
 
           # glibc >= 2.43, needed to dlopen WiVRn 26.9 Monado runtime from
