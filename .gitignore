@@ -27,3 +27,9 @@ config/HUD.config
 # nix-direnv
 .direnv/
 nvenv/
+.alvr-gc-root
+
+# WiVRn runtime build output (nix build .#wivrn-nvenc)
+.wivrn-nvenc-26.9
+.wivrn-26.9
+.wivrn-26.2.3

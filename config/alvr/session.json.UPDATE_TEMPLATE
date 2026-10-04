@@ -109,7 +109,7 @@
       "bitrate": {
         "gui_collapsed": false,
         "mode": {
-          "ConstantMbps": 1000,
+          "ConstantMbps": 500,
           "Adaptive": {
             "gui_collapsed": false,
             "saturation_multiplier": 0.95,
@@ -141,7 +141,7 @@
               }
             }
           },
-          "variant": "Adaptive"
+          "variant": "ConstantMbps"
         },
         "adapt_to_framerate": {
           "enabled": true,

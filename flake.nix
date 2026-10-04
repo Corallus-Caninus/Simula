@@ -33,6 +33,41 @@
           godot-haskell-plugin = pkgs.callPackage ./addons/godot-haskell-plugin { inherit godot-haskell; };
           godot-haskell-plugin-profiled = pkgs.callPackage ./addons/godot-haskell-plugin { inherit godot-haskell; profileBuild = true; };
 
+          # WiVRn 26.9 streaming runtime, built for this machine and for
+          # Simula. This is the standard/default VR backend (SteamVR+ALVR is
+          # deprecated). Why a custom build:
+          #   * nixpkgs' WiVRn is built with WIVRN_USE_NVENC=FALSE, so the
+          #     only hardware encoder available on NVIDIA is the buggy
+          #     Vulkan one (pink / flashing / corrupted frames).
+          #   * nixpkgs' WiVRn links ffmpeg 9, which requires NVENC API 13;
+          #     the installed NVIDIA driver 565.77 only supports API 12.2.
+          #     ffmpeg_7 uses nv-codec-headers 12.1 (API 12.1) and matches.
+          #   * Simula spawns controller pointer rays; WiVRn always exposes
+          #     controllers/hand-interaction. We patch them out behind
+          #     WIVRN_NO_CONTROLLERS=1.
+          # The runtime needs GLIBC_2.43; Simula is built against 2.39, so
+          # the wrapper runs godot under a compatible loader where required.
+          wivrn-nvenc = let
+            unstable = import (builtins.fetchTarball {
+              url = "https://github.com/NixOS/nixpkgs/archive/c59305bab2065cfecc4944690d9eedbb56f3a9fa.tar.gz";
+              sha256 = "16rsfnnxk6294sz6asx0shblirkhm4yyvkimq3v00c0y2114gp7b";
+            }) { inherit system; config.allowUnfree = true; };
+            wivrn = unstable.wivrn.override { ffmpeg = unstable.ffmpeg_7; };
+          in wivrn.overrideAttrs (old: {
+            cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DWIVRN_USE_NVENC:BOOL=TRUE" ];
+            patches = (old.patches or [ ]) ++ [ ./wivrn/disable-controllers.patch ];
+          });
+
+          # glibc >= 2.43, needed to dlopen WiVRn 26.9 Monado runtime from
+          # a Simula process built against glibc 2.39.
+          glibcForWivrn =
+            if (builtins.compareVersions pkgs.glibc.version "2.43") >= 0
+            then pkgs.glibc
+            else (import (builtins.fetchTarball {
+              url = "https://github.com/NixOS/nixpkgs/archive/c59305bab2065cfecc4944690d9eedbb56f3a9fa.tar.gz";
+              sha256 = "16rsfnnxk6294sz6asx0shblirkhm4yyvkimq3v00c0y2114gp7b";
+            }) { inherit system; }).glibc;
+
           # `haskell-dependencies` contains shared libraries
           # This attribute is needed to pick up `${any-package}/lib/ghc-9.6.5/lib/x86_64-linux-ghc-9.6.5/*.so` for `pkgs.autoPatchelfHook`
           haskell-dependencies = pkgs.stdenvNoCC.mkDerivation rec {
@@ -230,33 +265,56 @@
               export SIMULA_APP_DIR="'$out'/bin"
 
               # Set real-time priority for Simula and VR processes only
-              set_niceness() {
-                if command -v sudo >/dev/null 2>&1 && command -v renice >/dev/null 2>&1; then
-                  sudo renice -n -20 -p "$1" >/dev/null 2>&1 || true
-                fi
-                if command -v sudo >/dev/null 2>&1 && command -v ionice >/dev/null 2>&1; then
-                  sudo ionice -c 1 -n 0 -p "$1" >/dev/null 2>&1 || true
-                fi
-              }
-              set_priority_for() {
-                for pid in $(pgrep -x "$1" 2>/dev/null); do set_niceness "$pid"; done
-              }
+              # set_niceness() {
+              #   if command -v sudo >/dev/null 2>&1 && command -v renice >/dev/null 2>&1; then
+              #     sudo renice -n -20 -p "$1" >/dev/null 2>&1 || true
+              #   fi
+              #   if command -v sudo >/dev/null 2>&1 && command -v ionice >/dev/null 2>&1; then
+              #     sudo ionice -c 1 -n 0 -p "$1" >/dev/null 2>&1 || true
+              #   fi
+              # }
+              # set_priority_for() {
+              #   for pid in $(pgrep -x "$1" 2>/dev/null); do set_niceness "$pid"; done
+              # }
 
               export SIMULA_APP_DIR="'$out'/bin"
 
+              # Default VR backend is OpenXR via WiVRn (SteamVR + ALVR is
+              # deprecated). Simula selects OpenXR whenever XR_RUNTIME_JSON
+              # is set (see Plugin/Simula.hs).
+              WIVRN=${wivrn-nvenc}
+
               if grep -qi NixOS /etc/os-release; then
-                  echo "NixOS detected. Running Simula..."
+                  echo "NixOS detected. Running Simula (OpenXR / WiVRn)..."
 
                   # Detect active X11 display
                   export DISPLAY="''${DISPLAY:-:0}"
 
-                  # Verify SteamVR runtime exists
-                  XR_RUNTIME_JSON_CANDIDATE="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
-                  if [ -f "$XR_RUNTIME_JSON_CANDIDATE" ]; then
-                      export XR_RUNTIME_JSON="$XR_RUNTIME_JSON_CANDIDATE"
-                  else
-                      echo "Warning: SteamVR runtime not found at $XR_RUNTIME_JSON_CANDIDATE"
-                      echo "VR headset may not be detected."
+                  # --- WiVRn: start the server if it is not already running. ---
+                  # LD_LIBRARY_PATH exposes /run/opengl-driver/lib so
+                  # libavcodec can load libnvidia-encode.so.1 (NVENC).
+                  # WIVRN_NO_CONTROLLERS=1 stops WiVRn exposing controllers/
+                  # hand trackers, so Simula spawns no pointer rays.
+                  if ! pgrep -f "$WIVRN/bin/wivrn-server" >/dev/null 2>&1; then
+                      echo "Starting WiVRn server..."
+                      nohup env -u LD_LIBRARY_PATH \
+                          LD_LIBRARY_PATH=/run/opengl-driver/lib \
+                          XDG_RUNTIME_DIR="/run/user/$(id -u)" \
+                          WIVRN_NO_CONTROLLERS=1 \
+                          "$WIVRN/bin/wivrn-server" >/tmp/wivrn-server.log 2>&1 </dev/null &
+                      for _ in $(seq 1 20); do
+                          ss -ltn 2>/dev/null | grep -q :9757 && break
+                          sleep 0.5
+                      done
+                  fi
+
+                  # --- OpenXR runtime ---
+                  export XR_RUNTIME_JSON="$WIVRN/share/openxr/1/openxr_wivrn.json"
+
+                  # --- Audio: send game audio to the headset. ---
+                  if command -v pactl >/dev/null 2>&1 && \
+                     pactl list short sinks 2>/dev/null | grep -q wivrn.sink; then
+                      pactl set-default-sink wivrn.sink 2>/dev/null || true
                   fi
 
                   export XKB_DEFAULT_LAYOUT="us"
@@ -264,15 +322,17 @@
                   export XKB_DEFAULT_OPTIONS=""
                   export XKB_CONFIG_ROOT="${pkgs.xorg.xkeyboardconfig}/share/X11/xkb"
 
-                  godot -m "'$out'"/opt/simula/project.godot &
+                  # WiVRn 26.9 Monado runtime needs GLIBC_2.43; Simula is
+                  # built against 2.39. Run godot under a newer glibc loader
+                  # so the OpenXR runtime can be dlopen-ed.
+                  GLIBC_SYS=${glibcForWivrn}
+                  GODOT_BIN="$(command -v godot)"
+                  if [ -x "$GLIBC_SYS/lib/ld-linux-x86-64.so.2" ]; then
+                      "$GLIBC_SYS/lib/ld-linux-x86-64.so.2" --library-path "$GLIBC_SYS/lib:$LD_LIBRARY_PATH" "$GODOT_BIN" -m "'$out'"/opt/simula/project.godot &
+                  else
+                      godot -m "'$out'"/opt/simula/project.godot &
+                  fi
                   GODOT_PID=$!
-
-                  # Set niceness + ionice only for godot, SteamVR, and ALVR
-                  set_niceness "$GODOT_PID"
-                  set_priority_for vrserver
-                  set_priority_for vrcompositor
-                  set_priority_for alvr
-
                   wait "$GODOT_PID"
               else
                 echo "Detects non-NixOS distribution. Running Simula with nixGL..."
@@ -329,9 +389,25 @@
             programs.nixfmt.enable = true;
           };
 
+          # WiVRn 26.9 streaming runtime, built for this machine and for
+          # Simula. This is the standard/default VR backend (SteamVR+ALVR is
+          # deprecated). Why a custom build:
+          #   * nixpkgs' WiVRn is built with WIVRN_USE_NVENC=FALSE, so the
+          #     only hardware encoder available on NVIDIA is the buggy
+          #     Vulkan one (pink / flashing / corrupted frames).
+          #   * nixpkgs' WiVRn links ffmpeg 9, which requires NVENC API 13;
+          #     the installed NVIDIA driver 565.77 only supports API 12.2.
+          #     ffmpeg_7 uses nv-codec-headers 12.1 (API 12.1) and matches.
+          #   * Simula spawns controller pointer rays; WiVRn always exposes
+          #     controllers/hand-interaction. We patch them out behind
+          #     WIVRN_NO_CONTROLLERS=1.
+          # The runtime needs GLIBC_2.43; Simula is built against 2.39, so
+          # launch_simula_wivrn.sh runs godot under a glibc-2.44 loader.
           packages = {
-            inherit simula godot-haskell-plugin;
+            inherit simula godot-haskell-plugin wivrn-nvenc;
             default = simula;
+
+
 
             simula-debug = let
               godot-haskell-plugin' = godot-haskell-plugin-profiled;
@@ -437,29 +513,30 @@
                 export SIMULA_CONFIG_DIR="$XDG_CONFIG_HOME/Simula"
                 export SIMULA_APP_DIR="'$out'/bin"
 
-                set_niceness() {
-                  if command -v sudo >/dev/null 2>&1 && command -v renice >/dev/null 2>&1; then
-                    sudo renice -n -20 -p "$1" >/dev/null 2>&1 || true
-                  fi
-                  if command -v sudo >/dev/null 2>&1 && command -v ionice >/dev/null 2>&1; then
-                    sudo ionice -c 1 -n 0 -p "$1" >/dev/null 2>&1 || true
-                  fi
-                }
-                set_priority_for() {
-                  for pid in $(pgrep -x "$1" 2>/dev/null); do set_niceness "$pid"; done
-                }
+                # set_niceness() {
+                #   if command -v sudo >/dev/null 2>&1 && command -v renice >/dev/null 2>&1; then
+                #     sudo renice -n -20 -p "$1" >/dev/null 2>&1 || true
+                #   fi
+                #   if command -v sudo >/dev/null 2>&1 && command -v ionice >/dev/null 2>&1; then
+                #     sudo ionice -c 1 -n 0 -p "$1" >/dev/null 2>&1 || true
+                #   fi
+                # }
+                # set_priority_for() {
+                #   for pid in $(pgrep -x "$1" 2>/dev/null); do set_niceness "$pid"; done
+                # }
 
                 # RTS flags for profiling - override via GHCRTS env var
                 export GHCRTS="''${GHCRTS:--hT -sstderr}"
 
                 export DISPLAY="''${DISPLAY:-:0}"
 
-                XR_RUNTIME_JSON_CANDIDATE="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
-                if [ -f "$XR_RUNTIME_JSON_CANDIDATE" ]; then
-                    export XR_RUNTIME_JSON="$XR_RUNTIME_JSON_CANDIDATE"
-                else
-                    echo "Warning: SteamVR runtime not found at $XR_RUNTIME_JSON_CANDIDATE"
-                fi
+                # OpenVR backend (see main simula wrapper above)
+                # XR_RUNTIME_JSON_CANDIDATE="$HOME/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json"
+                # if [ -f "$XR_RUNTIME_JSON_CANDIDATE" ]; then
+                #     export XR_RUNTIME_JSON="$XR_RUNTIME_JSON_CANDIDATE"
+                # else
+                #     echo "Warning: SteamVR runtime not found at $XR_RUNTIME_JSON_CANDIDATE"
+                # fi
 
                 if grep -qi NixOS /etc/os-release; then
                     echo "NixOS detected. Running Simula (DEBUG/PROFILING mode)..."
@@ -469,10 +546,10 @@
                     export XKB_CONFIG_ROOT="${pkgs.xorg.xkeyboardconfig}/share/X11/xkb"
                     godot -m "'$out'"/opt/simula/project.godot &
                     GODOT_PID=$!
-                    set_niceness "$GODOT_PID"
-                    set_priority_for vrserver
-                    set_priority_for vrcompositor
-                    set_priority_for alvr
+                    # set_niceness "$GODOT_PID"
+                    # set_priority_for vrserver
+                    # set_priority_for vrcompositor
+                    # set_priority_for alvr
                     wait "$GODOT_PID"
                 else
                   echo "Detects non-NixOS distribution. Running Simula with nixGL..."

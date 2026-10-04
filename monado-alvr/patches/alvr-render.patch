@@ -1,0 +1,380 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4b7a926..fb5b71a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -14,10 +14,10 @@ set(PROJECT_SOURCE_DIR src/)
+ set(SRC_FILES
+ 	      ${PROJECT_SOURCE_DIR}/EncodePipeline.cpp
+ 	      # ${PROJECT_SOURCE_DIR}/EncodePipelineNvEnc.cpp
+-	      # ${PROJECT_SOURCE_DIR}/EncodePipelineSW.cpp
++	      ${PROJECT_SOURCE_DIR}/EncodePipelineSW.cpp
+ 	      ${PROJECT_SOURCE_DIR}/EncodePipelineVAAPI.cpp
+ 	      ${PROJECT_SOURCE_DIR}/ffmpeg_helper.cpp
+-	      # ${PROJECT_SOURCE_DIR}/FormatConverter.cpp
++	      ${PROJECT_SOURCE_DIR}/FormatConverter.cpp
+ 	      # ${PROJECT_SOURCE_DIR}/FrameRender.cpp
+ 	      # ${PROJECT_SOURCE_DIR}/Renderer.cpp
+ 	      ${PROJECT_SOURCE_DIR}/alvr_server/IDRScheduler.cpp
+@@ -50,6 +50,11 @@ pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
+ find_package(Vulkan REQUIRED)
+ 
+ add_library(libalvr STATIC IMPORTED)
+-set_target_properties(libalvr PROPERTIES IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/../alvr-monado/build/alvr_server_core/libalvr_server_core.so)
++if(NOT DEFINED ALVR_SERVER_CORE_LIB)
++  set(ALVR_SERVER_CORE_LIB ${CMAKE_SOURCE_DIR}/../alvr-monado/build/alvr_server_core/libalvr_server_core.so)
++endif()
++set_target_properties(libalvr PROPERTIES IMPORTED_LOCATION ${ALVR_SERVER_CORE_LIB})
+ 
+-target_link_libraries(AlvrRender PRIVATE PkgConfig::LIBAV libalvr ${VULKAN_LIB_LIST})
++pkg_check_modules(LIBX264 REQUIRED IMPORTED_TARGET libx264)
++
++target_link_libraries(AlvrRender PRIVATE PkgConfig::LIBAV libalvr ${VULKAN_LIB_LIST} PkgConfig::LIBX264)
+diff --git a/src/EncodePipeline.cpp b/src/EncodePipeline.cpp
+index f4e4242..852436c 100644
+--- a/src/EncodePipeline.cpp
++++ b/src/EncodePipeline.cpp
+@@ -22,22 +22,17 @@ void alvr::EncodePipeline::SetParams(FfiDynamicEncoderParams params) {
+   }
+ }
+ 
+-std::unique_ptr<alvr::EncodePipeline> alvr::EncodePipeline::Create(alvr::VkContext &vk_ctx, std::string devicePath, VkFrame &input_frame, /* VkFrameCtx &vk_frame_ctx,  */uint32_t width, uint32_t height)
++std::unique_ptr<alvr::EncodePipeline> alvr::EncodePipeline::Create(alvr::VkContext &vk_ctx, std::string devicePath, VkFrame &input_frame, alvr::render::Renderer *renderer, uint32_t width, uint32_t height)
+ {
+   using alvr::Vendor;
+   if(Settings::Instance().m_force_sw_encoding == false) {
+-    alvr::HWContext hwCtx(vk_ctx);
+     if (vk_ctx.meta.vendor == Vendor::Nvidia) {
+-      try {
+-        // auto nvenc = std::make_unique<alvr::EncodePipelineNvEnc>(render, vk_ctx, input_frame, vk_frame_ctx, width, height);
+-        // Info("Using NvEnc encoder");
+-        // return nvenc;
+-      } catch (std::exception &e)
+-      {
+-        Error("Failed to create NvEnc encoder: %s\nPlease make sure you have installed CUDA runtime.", e.what());
+-      }
++      // TODO: NvEnc pipeline not yet ported to the current frame model.
++      // Falls through to software encoding for now.
++      Warn("NvEnc pipeline not available in this build; using software encoding");
+     } else {
+       try {
++        alvr::HWContext hwCtx(vk_ctx);
+         auto vaapi = std::make_unique<alvr::EncodePipelineVAAPI>(hwCtx, devicePath, vk_ctx.meta.vendor, input_frame, width, height);
+         Info("Using VAAPI encoder");
+         return vaapi;
+@@ -47,10 +42,9 @@ std::unique_ptr<alvr::EncodePipeline> alvr::EncodePipeline::Create(alvr::VkConte
+       }
+     }
+   }
+-  // auto sw = std::make_unique<alvr::EncodePipelineSW>(render, width, height);
+-  // Info("Using SW encoder");
+-  // return sw;
+-    return nullptr;
++  auto sw = std::make_unique<alvr::EncodePipelineSW>(renderer, width, height);
++  Info("Using SW encoder");
++  return sw;
+ }
+ 
+ alvr::EncodePipeline::~EncodePipeline()
+diff --git a/src/EncodePipeline.h b/src/EncodePipeline.h
+index 2f93927..73470b7 100644
+--- a/src/EncodePipeline.h
++++ b/src/EncodePipeline.h
+@@ -2,13 +2,12 @@
+ #include <cstdint>
+ #include <memory>
+ #include "VkContext.hpp"
++#include "Renderer.hpp"
+ #include "interface.h"
+ 
+ extern "C" struct AVCodecContext;
+ extern "C" struct AVPacket;
+ 
+-class Renderer;
+-
+ namespace alvr
+ {
+ 
+@@ -39,7 +38,7 @@ public:
+   virtual int GetCodec();
+ 
+   virtual void SetParams(FfiDynamicEncoderParams params);
+-  static std::unique_ptr<EncodePipeline> Create(alvr::VkContext &vk_ctx, std::string devicePath, VkFrame &input_frame, /* VkFrameCtx &vk_frame_ctx,  */uint32_t width, uint32_t height);
++  static std::unique_ptr<EncodePipeline> Create(alvr::VkContext &vk_ctx, std::string devicePath, VkFrame &input_frame, alvr::render::Renderer *renderer, uint32_t width, uint32_t height);
+ 
+ protected:
+   // TODO: No inheritance here (Inheritance only for interfaces)
+diff --git a/src/EncodePipelineNvEnc.h b/src/EncodePipelineNvEnc.h
+index 323b7f3..f8e1231 100644
+--- a/src/EncodePipelineNvEnc.h
++++ b/src/EncodePipelineNvEnc.h
+@@ -2,12 +2,13 @@
+ 
+ #include <functional>
+ #include "EncodePipeline.h"
++#include "Renderer.hpp"
+ 
+ extern "C" struct AVBufferRef;
+ extern "C" struct AVCodecContext;
+ extern "C" struct AVFrame;
+ 
+-class Renderer;
++
+ 
+ namespace alvr
+ {
+@@ -16,12 +17,12 @@ class EncodePipelineNvEnc: public EncodePipeline
+ {
+ public:
+   ~EncodePipelineNvEnc();
+-  EncodePipelineNvEnc(Renderer *render, VkContext &vk_ctx, VkFrame &input_frame, VkFrameCtx& vk_frame_ctx, uint32_t width, uint32_t height);
++  EncodePipelineNvEnc(alvr::render::Renderer *render, VkContext &vk_ctx, VkFrame &input_frame, VkFrameCtx& vk_frame_ctx, uint32_t width, uint32_t height);
+ 
+   void PushFrame(uint64_t targetTimestampNs, bool idr) override;
+ 
+ private:
+-  Renderer *r = nullptr;
++  alvr::render::Renderer *r = nullptr;
+   AVBufferRef *hw_ctx = nullptr;
+   std::unique_ptr<AVFrame, std::function<void(AVFrame*)>> vk_frame;
+   AVFrame * hw_frame = nullptr;
+diff --git a/src/EncodePipelineSW.cpp b/src/EncodePipelineSW.cpp
+index 1cab9d3..bdfbf26 100644
+--- a/src/EncodePipelineSW.cpp
++++ b/src/EncodePipelineSW.cpp
+@@ -80,7 +80,8 @@ alvr::EncodePipelineSW::EncodePipelineSW(Renderer *render, uint32_t width, uint3
+ 
+   x264_picture_init(&picture_out);
+ 
+-  rgbtoyuv = new RgbToYuv420(render, render->GetOutput().image, render->GetOutput().imageInfo, render->GetOutput().semaphore);
++  auto output = renderer->getOutput();
++  rgbtoyuv = new RgbToYuv420(renderer, output.image.image, output.imageCI, renderer->getImages().sem);
+ }
+ 
+ alvr::EncodePipelineSW::~EncodePipelineSW()
+diff --git a/src/EncodePipelineSW.h b/src/EncodePipelineSW.h
+index df93601..9591589 100644
+--- a/src/EncodePipelineSW.h
++++ b/src/EncodePipelineSW.h
+@@ -3,6 +3,7 @@
+ #include "EncodePipeline.h"
+ 
+ #include <x264.h>
++#include "Renderer.hpp"
+ 
+ class FormatConverter;
+ 
+@@ -13,7 +14,7 @@ class EncodePipelineSW: public EncodePipeline
+ {
+ public:
+   ~EncodePipelineSW();
+-  EncodePipelineSW(Renderer *render, uint32_t width, uint32_t height);
++  EncodePipelineSW(alvr::render::Renderer *render, uint32_t width, uint32_t height);
+ 
+   void PushFrame(uint64_t targetTimestampNs, bool idr) override;
+   bool GetEncoded(FramePacket &packet) override;
+diff --git a/src/Encoder.cpp b/src/Encoder.cpp
+index bc37bde..283dd86 100644
+--- a/src/Encoder.cpp
++++ b/src/Encoder.cpp
+@@ -133,8 +133,13 @@ auto makeSpecs(T... args)
+ // TODO: #embed will have to do...
+ inline std::vector<u8> loadShaderFile(std::string shaderName)
+ {
++    std::filesystem::path shader;
++#ifdef ALVR_SHADER_DIR
++    shader = std::filesystem::path(ALVR_SHADER_DIR) / (shaderName + ".comp.spv");
++#else
+     auto srcFile = std::source_location::current().file_name();
+-    auto shader = std::filesystem::path(srcFile).remove_filename() / "shader/" / (shaderName + ".comp.spv");
++    shader = std::filesystem::path(srcFile).remove_filename() / "shader/" / (shaderName + ".comp.spv");
++#endif
+ 
+     std::ifstream stream(shader, std::ios::binary);
+     stream.seekg(0, std::ios::end);
+@@ -315,7 +320,7 @@ void Encoder::initEncoding()
+ 
+     auto frame = new alvr::VkFrame(vkCtx, out.image.image, out.imageCI, out.size, out.image.memory, out.drm);
+ 
+-    encoder = EncodePipeline::Create(vkCtx, devicePath, *frame, out.imageCI.extent.width, out.imageCI.extent.height);
++    encoder = EncodePipeline::Create(vkCtx, devicePath, *frame, &renderer.get(), out.imageCI.extent.width, out.imageCI.extent.height);
+ 
+     idrScheduler.OnStreamStart();
+ }
+diff --git a/src/FormatConverter.cpp b/src/FormatConverter.cpp
+index 62f5c25..99cd6dc 100644
+--- a/src/FormatConverter.cpp
++++ b/src/FormatConverter.cpp
+@@ -2,7 +2,7 @@
+ #include <fstream>
+ 
+ // TODO: Does this need to be a class like this?
+-FormatConverter::FormatConverter(Renderer *render) : r(render) {}
++FormatConverter::FormatConverter(alvr::render::Renderer *render) : r(render) {}
+ 
+ FormatConverter::~FormatConverter() {
+   for (const OutputImage &image : m_images) {
+@@ -293,12 +293,18 @@ uint64_t FormatConverter::GetTimestamp() {
+   return query * r->m_timestampPeriod;
+ }
+ 
+-RgbToYuv420::RgbToYuv420(Renderer *render, VkImage image,
++RgbToYuv420::RgbToYuv420(alvr::render::Renderer *render, VkImage image,
+                          VkImageCreateInfo imageInfo, VkSemaphore semaphore)
+     : FormatConverter(render) {
+ 
+-	// TODO: Unfuck (somehow)
+-    std::ifstream t("/home/duck/devel/alvr_render/src/shader/rgbtoyuv420.comp.spv", std::ios::binary);
++    std::string shaderPath;
++#ifdef ALVR_SHADER_DIR
++    shaderPath = std::string(ALVR_SHADER_DIR) + "/rgbtoyuv420.comp.spv";
++#else
++    auto srcFile = std::source_location::current().file_name();
++    shaderPath = (std::filesystem::path(srcFile).remove_filename() / "shader/" / "rgbtoyuv420.comp.spv").string();
++#endif
++    std::ifstream t(shaderPath, std::ios::binary);
+     t.seekg(0, std::ios::end);
+     auto len = t.tellg();
+     t.seekg(0, std::ios::beg);
+diff --git a/src/FormatConverter.h b/src/FormatConverter.h
+index f2a39c7..dbeee51 100644
+--- a/src/FormatConverter.h
++++ b/src/FormatConverter.h
+@@ -1,6 +1,6 @@
+ #pragma once
+ 
+-#include "Renderer.h"
++#include "Renderer.hpp"
+ 
+ // Basically a glorified hack for software encoding
+ class FormatConverter
+@@ -30,10 +30,10 @@ protected:
+         uint8_t *mapped = nullptr;
+     };
+ 
+-    explicit FormatConverter(Renderer *render);
++    explicit FormatConverter(alvr::render::Renderer *render);
+     void init(VkImage image, VkImageCreateInfo imageCreateInfo, VkSemaphore semaphore, int count, const unsigned char *shaderData, unsigned shaderLen);
+ 
+-    Renderer *r;
++    alvr::render::Renderer *r;
+     VkQueryPool m_queryPool = VK_NULL_HANDLE;
+     VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
+     VkDescriptorSetLayout m_descriptorLayout = VK_NULL_HANDLE;
+@@ -53,5 +53,5 @@ protected:
+ class RgbToYuv420 : public FormatConverter
+ {
+ public:
+-    explicit RgbToYuv420(Renderer *render, VkImage image, VkImageCreateInfo imageInfo, VkSemaphore semaphore);
++    explicit RgbToYuv420(alvr::render::Renderer *render, VkImage image, VkImageCreateInfo imageInfo, VkSemaphore semaphore);
+ };
+diff --git a/src/Renderer.cpp b/src/Renderer.cpp
+index 6c0b701..52716c0 100644
+--- a/src/Renderer.cpp
++++ b/src/Renderer.cpp
+@@ -389,6 +389,22 @@ namespace alvr::render {
+ // and output import?
+ Renderer::Renderer(VkContext const& vkCtx, ImageRequirements& imgReqs, std::vector<PipelineCreateInfo> pipeCIs)
+ {
++    m_physDev = vkCtx.physDev;
++    m_dev = vkCtx.dev;
++    m_queue = vkCtx.rawQueue();
++    m_d = vkCtx.dispatch;
++
++    vk::PhysicalDeviceProperties props2;
++    m_physDev.getProperties(&props2, m_d);
++    m_timestampPeriod = props2.limits.timestampPeriod;
++
++    vk::CommandPoolCreateInfo cmdPoolCI {
++        .flags = vk::CommandPoolCreateFlagBits::eTransient,
++        .queueFamilyIndex = vkCtx.meta.queueFamily,
++    };
++    m_commandPool = m_dev.createCommandPool(cmdPoolCI);
++    m_fence = m_dev.createFence(vk::FenceCreateInfo {});
++
+     // We can use the extend from monado since that's directed by what we told monado
+     imgExtend = imgReqs.extent;
+ 
+@@ -618,3 +634,45 @@ void Renderer::destroy(VkContext const& ctx)
+ }
+ 
+ }
++
++// Legacy helpers used by the software-encode FormatConverter path.
++
++uint32_t
++Renderer::memoryTypeIndex(VkMemoryPropertyFlags wanted, VkMemoryPropertyFlags have)
++{
++    auto props = m_physDev.getMemoryProperties(m_d);
++    for (u32 i = 0; i < props.memoryTypeCount; ++i) {
++        auto flags = static_cast<VkMemoryPropertyFlags>(props.memoryTypes[i].propertyFlags);
++        if ((flags & wanted) == wanted && have & (1u << i)) {
++            return i;
++        }
++    }
++    return 0xFFFFFFFFu;
++}
++
++void
++Renderer::commandBufferBegin()
++{
++    vk::CommandBufferAllocateInfo allocInfo {
++        .commandPool = m_commandPool,
++        .commandBufferCount = 1,
++    };
++    m_commandBuffer = m_dev.allocateCommandBuffers(allocInfo)[0];
++    m_commandBuffer.begin(vk::CommandBufferBeginInfo { .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
++}
++
++void
++Renderer::commandBufferSubmit()
++{
++    m_commandBuffer.end();
++    vk::Queue queue(m_queue);
++    vk::SubmitInfo submitInfo {
++        .commandBufferCount = 1,
++        .pCommandBuffers = &m_commandBuffer,
++    };
++    queue.submit(submitInfo, m_fence);
++    m_dev.waitForFences(m_fence, true, UINT64_MAX);
++    m_dev.resetFences(m_fence);
++    m_dev.freeCommandBuffers(m_commandPool, m_commandBuffer);
++    m_commandBuffer = VK_NULL_HANDLE;
++}
+diff --git a/src/Renderer.hpp b/src/Renderer.hpp
+index 3a43b6b..fa62428 100644
+--- a/src/Renderer.hpp
++++ b/src/Renderer.hpp
+@@ -100,6 +100,20 @@ public:
+     // NOTE: Use the output immediately afterwards, as this synchronizes to the end of gpu operations
+     void render(VkContext& vkCtx, u32 index, u64 waitValue);
+ 
++    // Legacy helpers used by the software-encode FormatConverter path.
++    vk::PhysicalDevice m_physDev;
++    vk::Device m_dev;
++    VkQueue m_queue;
++    VkCommandPool m_commandPool;
++    VkCommandBuffer m_commandBuffer;
++    VkFence m_fence;
++    double m_timestampPeriod;
++    vk::DispatchLoaderDynamic m_d;
++
++    uint32_t memoryTypeIndex(VkMemoryPropertyFlags wanted, VkMemoryPropertyFlags have);
++    void commandBufferBegin();
++    void commandBufferSubmit();
++
+     AlvrVkExport getImages()
+     {
+         AlvrVkExport expt {
+diff --git a/src/VkContext.hpp b/src/VkContext.hpp
+index f11754a..45dcba8 100644
+--- a/src/VkContext.hpp
++++ b/src/VkContext.hpp
+@@ -224,6 +224,8 @@ public:
+         sharedInit();
+     }
+ 
++    VkQueue rawQueue() const { return queue; }
++
+     void useQueue(std::function<void (vk::Queue&)> fn) {
+         if (queueMutex.has_value())
+             queueMutex->lock(&queueMutex->mutex);

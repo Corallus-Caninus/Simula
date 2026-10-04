@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# alvr - launch the ALVR dashboard with a working SteamVR compositor.
+#
+# Runs setup.sh first so the ALVR 20.6.1 vrcompositor wrapper + Vulkan
+# layer and the ALVR 20.12.1 driver are always in place, then starts the
+# custom ALVR 20.12.1 dashboard from ~/Code/alvr.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+"$SCRIPT_DIR/setup.sh"
+
+ALVR_DASH="$(readlink -f "$HOME/Code/alvr/result")/bin/alvr_dashboard"
+[ -x "$ALVR_DASH" ] || { echo "ALVR dashboard not found: $ALVR_DASH" >&2; exit 1; }
+
+exec "$ALVR_DASH" "$@"

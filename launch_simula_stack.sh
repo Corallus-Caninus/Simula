@@ -12,14 +12,17 @@ STEAMVR_DRIVERS="$HOME/.local/share/Steam/steamapps/common/SteamVR/drivers"
 
 # ------------------------------------------------------------------
 # Step 1: Unblock ALVR from SteamVR Safe Mode
-# Must happen before SteamVR reads its settings.
+# Must happen before SteamVR reads its settings. SteamVR re-writes
+# "blocked_by_safe_mode" : true whenever a safe mode event occurs, and
+# the settings UI refuses to re-enable a blocked driver (the add-ons
+# button is greyed out). Stripping the key entirely on every launch
+# guarantees the driver is never blocked.
 # ------------------------------------------------------------------
 ALVR_UNBLOCK_SETTINGS="$HOME/.local/share/Steam/config/steamvr.vrsettings"
 if [ -f "$ALVR_UNBLOCK_SETTINGS" ]; then
-    CURRENT="$(grep -c '"blocked_by_safe_mode".*true' "$ALVR_UNBLOCK_SETTINGS" || true)"
-    if [ "$CURRENT" -gt 0 ]; then
+    if grep -q '"blocked_by_safe_mode"' "$ALVR_UNBLOCK_SETTINGS"; then
         echo "Unblocking ALVR from SteamVR Safe Mode..."
-        sed -i 's/"blocked_by_safe_mode"\s*:\s*true/"blocked_by_safe_mode" : false/g' "$ALVR_UNBLOCK_SETTINGS"
+        sed -i '/"blocked_by_safe_mode"/d' "$ALVR_UNBLOCK_SETTINGS"
     else
         echo "ALVR already unblocked."
     fi
@@ -32,22 +35,31 @@ fi
 # SteamVR loads its drivers at startup. If the ALVR driver isn't in
 # the drivers/ directory when SteamVR starts, the headset won't be
 # detected and ALVR won't be able to register its driver path.
+#
+# Uses the ALVR 20.14.1 build (see ./alvr wrapper). The 20.6.1 driver
+# segfaulted vrserver on Linux; fixed upstream in 20.8.1+.
 # ------------------------------------------------------------------
 echo "--- Registering ALVR driver with SteamVR ---"
-ALVR_EXTRACTED="$(find /nix/store -maxdepth 1 -name '*alvr*extracted*' -type d 2>/dev/null | head -1)"
-if [ -n "$ALVR_EXTRACTED" ] && [ -d "$ALVR_EXTRACTED/usr/lib64/alvr" ]; then
-    # Remove any stale symlink from previous runs
-    rm -rf "$STEAMVR_DRIVERS/alvr"
+ALVR_GC_ROOT="$SCRIPT_DIR/.alvr-gc-root"
+if [ -f "$ALVR_GC_ROOT" ]; then
+    ALVR_DRIVER_DIR="$(readlink -f "$ALVR_GC_ROOT")/lib/alvr"
+else
+    ALVR_EXTRACTED="$(find /nix/store -maxdepth 1 -name '*alvr*extracted*' -type d 2>/dev/null | head -1)"
+    if [ -n "$ALVR_EXTRACTED" ]; then
+        ALVR_DRIVER_DIR="$ALVR_EXTRACTED/usr/lib64/alvr"
+    fi
+fi
+if [ -n "$ALVR_DRIVER_DIR" ] && [ -f "$ALVR_DRIVER_DIR/driver.vrdrivermanifest" ]; then
     # Use vrpathreg to register ALVR as an external driver.
     # This modifies openvrpaths.vrpath's external_drivers list, which is
     # what SteamVR and ALVR expect — the symlink approach alone doesn't
     # update this registry, causing "ALVR driver path not registered".
     export LD_LIBRARY_PATH="$HOME/.local/share/Steam/steamapps/common/SteamVR/bin/linux64:$LD_LIBRARY_PATH"
     VR_PATHREG="$STEAMVR_DRIVERS/../bin/linux64/vrpathreg"
-    "$VR_PATHREG" adddriver "$ALVR_EXTRACTED/usr/lib64/alvr" 2>&1 && \
-        echo "Registered: $ALVR_EXTRACTED/usr/lib64/alvr"
+    "$VR_PATHREG" adddriver "$ALVR_DRIVER_DIR" 2>&1 && \
+        echo "Registered: $ALVR_DRIVER_DIR"
 else
-    echo "Warning: Could not find ALVR driver directory (extracted=$ALVR_EXTRACTED)"
+    echo "Warning: Could not find ALVR driver directory (driver_dir=$ALVR_DRIVER_DIR)"
 fi
 
 # ------------------------------------------------------------------
@@ -124,9 +136,19 @@ echo ""
 # Step 6: Launch Simula
 # ------------------------------------------------------------------
 echo "--- Launching Simula ---"
-if [ -f "$SIMULA_BIN" ]; then
-    exec "$SIMULA_BIN"
-else
+if [ ! -f "$SIMULA_BIN" ]; then
     echo "Simula binary not found at $SIMULA_BIN. Building..."
-    nix build "$SCRIPT_DIR" && exec "$SIMULA_BIN"
+    nix build "$SCRIPT_DIR"
 fi
+
+# When Simula is closed, tear SteamVR down as well. SteamVR's X button
+# only hides the window on Linux and vrserver can linger after exit,
+# which makes SteamVR look unkillable (stop_steamvr.sh fixes that).
+cleanup_steamvr() {
+    echo ""
+    echo "--- Simula closed, shutting down SteamVR ---"
+    "$SCRIPT_DIR/stop_steamvr.sh" || true
+}
+
+trap cleanup_steamvr EXIT INT TERM
+"$SIMULA_BIN"

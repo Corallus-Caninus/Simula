@@ -1,0 +1,38 @@
+diff -ruN ws_orig/server/driver/wivrn_session.cpp ws_new/server/driver/wivrn_session.cpp
+--- a/server/driver/wivrn_session.cpp	2026-10-04 06:26:47.665997776 +0000
++++ b/server/driver/wivrn_session.cpp	2026-10-04 06:26:47.670997778 +0000
+@@ -122,13 +122,28 @@
+ 	if (hmd.supported.face_tracking)
+ 		static_roles.face = &hmd;
+ 
+-	roles.left = left_controller_index = static_xdev_count++;
+-	static_roles.hand_tracking.unobstructed.left = static_xdevs[left_controller_index] = &left_controller;
+-	static_xdevs[left_hand_interaction_index = static_xdev_count++] = &left_hand_interaction;
++	// PATCH (Simula): WiVRn always registers controllers and hand-interaction
++	// devices. Simula then creates controller nodes with pointer rays, which
++	// hijack the mouse/focus. Allow suppressing them via WIVRN_NO_CONTROLLERS=1.
++	bool expose_controllers = std::getenv("WIVRN_NO_CONTROLLERS") == nullptr;
+ 
+-	roles.right = right_controller_index = static_xdev_count++;
+-	static_roles.hand_tracking.unobstructed.right = static_xdevs[right_controller_index] = &right_controller;
+-	static_xdevs[right_hand_interaction_index = static_xdev_count++] = &right_hand_interaction;
++	if (expose_controllers)
++	{
++		roles.left = left_controller_index = static_xdev_count++;
++		static_roles.hand_tracking.unobstructed.left = static_xdevs[left_controller_index] = &left_controller;
++		static_xdevs[left_hand_interaction_index = static_xdev_count++] = &left_hand_interaction;
++
++		roles.right = right_controller_index = static_xdev_count++;
++		static_roles.hand_tracking.unobstructed.right = static_xdevs[right_controller_index] = &right_controller;
++		static_xdevs[right_hand_interaction_index = static_xdev_count++] = &right_hand_interaction;
++	}
++	else
++	{
++		roles.left = XRT_DEVICE_INVALID;
++		roles.right = XRT_DEVICE_INVALID;
++		static_roles.hand_tracking.unobstructed.left = nullptr;
++		static_roles.hand_tracking.unobstructed.right = nullptr;
++	}
+ 
+ 	// Expose a gamepad forwarded from the headset as a native OpenXR device (/user/gamepad).
+ 	// Always present; inactive until the headset reports a connected gamepad.
