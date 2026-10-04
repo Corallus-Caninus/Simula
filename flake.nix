@@ -316,21 +316,28 @@
                   }
                   if wivrn_running; then
                       echo "WiVRn server already running; reusing it."
-                  elif ss -ltn 2>/dev/null | grep -q :9757; then
-                      echo "Port 9757 busy but no wivrn-server; clearing stale listeners."
-                      for _pid in $(ss -ltnp 2>/dev/null | grep :9757 | grep -oE pid=[0-9]+ | cut -d= -f2 | sort -u); do
-                          kill "$_pid" 2>/dev/null || true
-                      done
-                      sleep 1
-                  fi
-                  if ! wivrn_running && ! ss -ltn 2>/dev/null | grep -q :9757; then
+                  else
+                      # No live server: clear any stale listener/socket left by a
+                      # killed session (TCP or UDP, which is what actually
+                      # reports "Address already in use"), then start fresh.
+                      if ss -ltn 2>/dev/null | grep -q :9757 || \
+                         ss -lun 2>/dev/null | grep -q :9757; then
+                          echo "Clearing stale listeners on 9757."
+                          for _pid in $(ss -ltnp 2>/dev/null | grep :9757 | grep -oE pid=[0-9]+ | cut -d= -f2 | sort -u); do
+                              kill -9 "$_pid" 2>/dev/null || true
+                          done
+                          sleep 1
+                      fi
                       echo "Starting WiVRn server..."
+                      # WiVRn forks a child per connection which is hard to
+                      # reap; --no-fork keeps one process we can manage and
+                      # clean up. Also remove the stale IPC socket.
                       rm -f "/run/user/$(id -u)/wivrn/comp_ipc"
                       nohup env -u LD_LIBRARY_PATH \
                           LD_LIBRARY_PATH=/run/opengl-driver/lib \
                           XDG_RUNTIME_DIR="/run/user/$(id -u)" \
                           WIVRN_NO_CONTROLLERS=1 \
-                          "$WIVRN/bin/wivrn-server" >/tmp/wivrn-server.log 2>&1 </dev/null &
+                          "$WIVRN/bin/wivrn-server" --no-fork >/tmp/wivrn-server.log 2>&1 </dev/null &
                       for _ in $(seq 1 40); do
                           ss -ltn 2>/dev/null | grep -q :9757 && break
                           sleep 0.5
